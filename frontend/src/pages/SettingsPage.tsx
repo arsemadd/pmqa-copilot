@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, type AISettings } from '../api/client'
 
 type OutletContext = {
   displayName: string
@@ -11,24 +11,67 @@ type OutletContext = {
 export const SettingsPage = () => {
   const { displayName, setDisplayName } = useOutletContext<OutletContext>()
   const [name, setName] = useState(displayName)
-  const [saved, setSaved] = useState(false)
+  const [ai, setAi] = useState<AISettings | null>(null)
+  const [provider, setProvider] = useState('')
+  const [model, setModel] = useState('')
+  const [openaiKey, setOpenaiKey] = useState('')
+  const [claudeKey, setClaudeKey] = useState('')
+  const [ollamaUrl, setOllamaUrl] = useState('http://127.0.0.1:11434')
+  const [standupRubric, setStandupRubric] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setName(displayName)
   }, [displayName])
 
-  const handleSubmit = async (event: FormEvent) => {
+  useEffect(() => {
+    const load = async () => {
+      const settings = await api.getAiSettings()
+      setAi(settings)
+      setProvider(settings.provider)
+      setModel(settings.model)
+      setOllamaUrl(settings.ollama_base_url || 'http://127.0.0.1:11434')
+      const rubric = await api.getRubric('standup')
+      setStandupRubric(((rubric.criteria as string[]) || []).join('\n'))
+    }
+    void load().catch((err) => setError(err instanceof Error ? err.message : 'Failed to load settings'))
+  }, [])
+
+  const handleProfile = async (event: FormEvent) => {
     event.preventDefault()
     setError(null)
-    setSaved(false)
-    try {
-      const updated = await api.updateSettings({ display_name: name.trim() || 'PM' })
-      setDisplayName(updated.display_name ?? name)
-      setSaved(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save settings')
+    const updated = await api.updateSettings({ display_name: name.trim() || 'PM' })
+    setDisplayName(updated.display_name ?? name)
+    setMessage('Profile saved.')
+  }
+
+  const handleAi = async (event: FormEvent) => {
+    event.preventDefault()
+    setError(null)
+    const payload: Record<string, string> = {
+      provider,
+      model,
+      ollama_base_url: ollamaUrl,
     }
+    if (openaiKey.trim()) payload.openai_api_key = openaiKey.trim()
+    if (claudeKey.trim()) payload.claude_api_key = claudeKey.trim()
+    const updated = await api.updateAiSettings(payload)
+    setAi(updated)
+    setOpenaiKey('')
+    setClaudeKey('')
+    setMessage('AI provider saved locally.')
+  }
+
+  const handleRubric = async (event: FormEvent) => {
+    event.preventDefault()
+    setError(null)
+    const criteria = standupRubric
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+    await api.updateRubric('standup', criteria)
+    setMessage('Standup rubric updated (version bumped).')
   }
 
   return (
@@ -37,15 +80,14 @@ export const SettingsPage = () => {
         <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-ink-muted)]">System</p>
         <h1 className="font-[family-name:var(--font-display)] text-5xl">Settings</h1>
         <p className="max-w-2xl text-[var(--color-ink-muted)]">
-          Preferences are stored locally on this machine. Credentials live in encrypted connection files
-          (and OS keychain when available).
+          Preferences, AI provider, and editable rubrics — stored locally, not hardcoded forever.
         </p>
       </header>
 
-      <form
-        onSubmit={(event) => void handleSubmit(event)}
-        className="max-w-lg space-y-4 rounded-xl border border-[var(--color-line)] bg-white/60 p-6"
-      >
+      {message ? <p className="text-sm text-[var(--color-ok)]" role="status">{message}</p> : null}
+      {error ? <p className="text-sm text-[var(--color-bad)]" role="alert">{error}</p> : null}
+
+      <form onSubmit={(event) => void handleProfile(event)} className="max-w-lg space-y-4 rounded-xl border border-[var(--color-line)] bg-white/60 p-6">
         <h2 className="text-lg font-semibold">Profile</h2>
         <label className="block text-sm">
           <span className="mb-1 block text-[var(--color-ink-muted)]">Display name</span>
@@ -54,36 +96,88 @@ export const SettingsPage = () => {
             value={name}
             onChange={(event) => setName(event.target.value)}
             className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
-            aria-label="Display name"
           />
         </label>
-        <button
-          type="submit"
-          className="rounded-md bg-[var(--color-sea)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-sea-bright)]"
-        >
-          Save settings
+        <button type="submit" className="rounded-md bg-[var(--color-sea)] px-4 py-2 text-sm font-medium text-white">
+          Save profile
         </button>
-        {saved ? <p className="text-sm text-[var(--color-ok)]" role="status">Saved locally.</p> : null}
-        {error ? <p className="text-sm text-[var(--color-bad)]" role="alert">{error}</p> : null}
       </form>
 
-      <section className="max-w-lg space-y-3 rounded-xl border border-[var(--color-line)] bg-white/60 p-6">
+      <form onSubmit={(event) => void handleAi(event)} className="max-w-lg space-y-4 rounded-xl border border-[var(--color-line)] bg-white/60 p-6">
         <h2 className="text-lg font-semibold">AI Provider</h2>
         <p className="text-sm text-[var(--color-ink-muted)]">
-          OpenAI / Claude / Ollama will be configurable here. Not implemented in this milestone.
+          Current: {ai?.provider || 'none'}
+          {ai?.openai_api_key_set ? ' · OpenAI key set' : ''}
+          {ai?.claude_api_key_set ? ' · Claude key set' : ''}
         </p>
-        <p className="inline-flex items-center gap-2 text-sm text-[var(--color-ink-muted)]">
-          <span className="h-2 w-2 rounded-full bg-[var(--color-ink-muted)]" aria-hidden />
-          Not configured
-        </p>
-      </section>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[var(--color-ink-muted)]">Provider</span>
+          <select
+            value={provider}
+            onChange={(event) => setProvider(event.target.value)}
+            className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
+          >
+            <option value="">Select…</option>
+            <option value="openai">OpenAI</option>
+            <option value="claude">Claude</option>
+            <option value="ollama">Ollama (local)</option>
+          </select>
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[var(--color-ink-muted)]">Model</span>
+          <input
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            placeholder="gpt-4o-mini / claude-3-5-haiku-latest / llama3.2"
+            className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[var(--color-ink-muted)]">OpenAI API key</span>
+          <input
+            type="password"
+            value={openaiKey}
+            onChange={(event) => setOpenaiKey(event.target.value)}
+            className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
+            placeholder={ai?.openai_api_key_set ? '•••• saved' : ''}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[var(--color-ink-muted)]">Claude API key</span>
+          <input
+            type="password"
+            value={claudeKey}
+            onChange={(event) => setClaudeKey(event.target.value)}
+            className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
+            placeholder={ai?.claude_api_key_set ? '•••• saved' : ''}
+          />
+        </label>
+        <label className="block text-sm">
+          <span className="mb-1 block text-[var(--color-ink-muted)]">Ollama base URL</span>
+          <input
+            value={ollamaUrl}
+            onChange={(event) => setOllamaUrl(event.target.value)}
+            className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
+          />
+        </label>
+        <button type="submit" className="rounded-md bg-[var(--color-ink)] px-4 py-2 text-sm font-medium text-white">
+          Save AI settings
+        </button>
+      </form>
 
-      <section className="max-w-lg space-y-2 text-sm text-[var(--color-ink-muted)]">
-        <h2 className="text-lg font-semibold text-[var(--color-ink)]">Local storage</h2>
-        <p><code className="text-[var(--color-ink)]">local/connections/</code> — encrypted integration credentials</p>
-        <p><code className="text-[var(--color-ink)]">local/settings/</code> — app preferences JSON</p>
-        <p><code className="text-[var(--color-ink)]">local/cache/</code> — short-lived fetched data (future)</p>
-      </section>
+      <form onSubmit={(event) => void handleRubric(event)} className="max-w-lg space-y-4 rounded-xl border border-[var(--color-line)] bg-white/60 p-6">
+        <h2 className="text-lg font-semibold">Standup rubric</h2>
+        <p className="text-sm text-[var(--color-ink-muted)]">One criterion per line. Editing bumps the version.</p>
+        <textarea
+          value={standupRubric}
+          onChange={(event) => setStandupRubric(event.target.value)}
+          rows={8}
+          className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2 text-sm"
+        />
+        <button type="submit" className="rounded-md border border-[var(--color-ink)] px-4 py-2 text-sm font-medium">
+          Save rubric
+        </button>
+      </form>
     </div>
   )
 }

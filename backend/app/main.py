@@ -1,19 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.ai.templates import ensure_ai_files
 from app.api.router import api_router
 from app.api.settings import health_router
+from app.context.knowledge import ensure_knowledge_dirs
 from app.core.settings import ensure_local_dirs, get_settings
 
 
 def create_app() -> FastAPI:
   ensure_local_dirs()
+  ensure_knowledge_dirs()
+  ensure_ai_files()
   settings = get_settings()
 
   app = FastAPI(
     title="PMQA Copilot",
-    description="Local PM + QA command center — integrations first, AI later.",
-    version="0.1.0",
+    description="Local PM + QA command center with grounded AI.",
+    version="0.2.0",
   )
 
   app.add_middleware(

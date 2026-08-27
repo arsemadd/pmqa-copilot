@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app.core.settings import get_settings
+from app.core.integration_config import get_jira_oauth_config
 from app.core.storage import delete_connection, load_connection, save_connection
 from app.integrations.base import (
   AuthMethod,
@@ -48,8 +48,7 @@ class JiraIntegration(Integration):
     ]
 
   def _oauth_configured(self) -> bool:
-    settings = get_settings()
-    return bool(settings.jira_client_id and settings.jira_client_secret)
+    return get_jira_oauth_config()["configured"]
 
   def _is_connected(self, data: dict | None) -> bool:
     if not data:
@@ -95,24 +94,24 @@ class JiraIntegration(Integration):
     )
 
   async def start_oauth(self) -> AuthStartResponse:
-    settings = get_settings()
-    if not self._oauth_configured():
+    oauth = get_jira_oauth_config()
+    if not oauth["configured"]:
       raise ValueError(
-        "Jira OAuth is not configured. Set JIRA_CLIENT_ID and JIRA_CLIENT_SECRET in .env"
+        "Jira OAuth is not configured. Add Client ID and Secret in Integrations → Jira OAuth setup, "
+        "or set JIRA_CLIENT_ID and JIRA_CLIENT_SECRET in .env"
       )
 
     state = secrets.token_urlsafe(24)
     pending = load_connection(self.id) or {}
     pending["oauth_state"] = state
     pending["oauth_started_at"] = time.time()
-    # Keep existing tokens if reconnecting; state is ephemeral until callback
     save_connection(self.id, pending)
 
     params = {
       "audience": "api.atlassian.com",
-      "client_id": settings.jira_client_id,
+      "client_id": oauth["client_id"],
       "scope": " ".join(JIRA_SCOPES),
-      "redirect_uri": settings.jira_redirect_uri,
+      "redirect_uri": oauth["redirect_uri"],
       "state": state,
       "response_type": "code",
       "prompt": "consent",
@@ -125,7 +124,7 @@ class JiraIntegration(Integration):
     )
 
   async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    settings = get_settings()
+    oauth = get_jira_oauth_config()
     pending = load_connection(self.id) or {}
     expected = pending.get("oauth_state")
     if not expected or expected != state:
@@ -136,13 +135,15 @@ class JiraIntegration(Integration):
         ATLASSIAN_TOKEN_URL,
         json={
           "grant_type": "authorization_code",
-          "client_id": settings.jira_client_id,
-          "client_secret": settings.jira_client_secret,
+          "client_id": oauth["client_id"],
+          "client_secret": oauth["client_secret"],
           "code": code,
-          "redirect_uri": settings.jira_redirect_uri,
+          "redirect_uri": oauth["redirect_uri"],
         },
       )
-      token_response.raise_for_status()
+      if token_response.status_code >= 400:
+        body = token_response.text
+        raise ValueError(f"Token exchange failed ({token_response.status_code}): {body}")
       tokens = token_response.json()
 
       access_token = tokens["access_token"]
@@ -279,14 +280,14 @@ class JiraIntegration(Integration):
     if not refresh_token:
       raise ValueError("Jira access token expired and no refresh token is available. Reconnect.")
 
-    settings = get_settings()
+    oauth = get_jira_oauth_config()
     async with httpx.AsyncClient(timeout=30.0) as client:
       response = await client.post(
         ATLASSIAN_TOKEN_URL,
         json={
           "grant_type": "refresh_token",
-          "client_id": settings.jira_client_id,
-          "client_secret": settings.jira_client_secret,
+          "client_id": oauth["client_id"],
+          "client_secret": oauth["client_secret"],
           "refresh_token": refresh_token,
         },
       )
@@ -300,25 +301,24 @@ class JiraIntegration(Integration):
     save_connection(self.id, data)
     return data
 
-  async def get_projects(self) -> list[dict[str, Any]]:
-    """Standard integration surface used by features later."""
+  async def _jira_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
     if not await self.authenticate():
       raise ValueError("Jira is not connected.")
 
     data = load_connection(self.id)
     assert data is not None
+    params = params or {}
 
     if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
       async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
-          f"{data['site_url']}/rest/api/3/project/search",
+          f"{data['site_url']}{path}",
           auth=(data["account_email"], data["pat_token"]),
           headers={"Accept": "application/json"},
-          params={"maxResults": 50},
+          params=params,
         )
         response.raise_for_status()
-        body = response.json()
-      return body.get("values", [])
+        return response.json()
 
     data = await self._ensure_fresh_oauth_token(data)
     headers = {
@@ -327,10 +327,108 @@ class JiraIntegration(Integration):
     }
     async with httpx.AsyncClient(timeout=30.0) as client:
       response = await client.get(
-        f"https://api.atlassian.com/ex/jira/{data['cloud_id']}/rest/api/3/project/search",
+        f"https://api.atlassian.com/ex/jira/{data['cloud_id']}{path}",
         headers=headers,
-        params={"maxResults": 50},
+        params=params,
       )
       response.raise_for_status()
-      body = response.json()
+      return response.json()
+
+  async def get_projects(self) -> list[dict[str, Any]]:
+    body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50})
     return body.get("values", [])
+
+  async def get_issues(
+    self,
+    *,
+    jql: str | None = None,
+    max_results: int = 50,
+  ) -> list[dict[str, Any]]:
+    query = jql or "updated >= -14d ORDER BY updated DESC"
+    body = await self._jira_get(
+      "/rest/api/3/search",
+      {
+        "jql": query,
+        "maxResults": max_results,
+        "fields": "summary,status,assignee,updated,priority,issuetype,description,labels",
+      },
+    )
+    issues = body.get("issues", [])
+    normalized: list[dict[str, Any]] = []
+    for issue in issues:
+      fields = issue.get("fields") or {}
+      assignee = fields.get("assignee") or {}
+      status = fields.get("status") or {}
+      priority = fields.get("priority") or {}
+      issuetype = fields.get("issuetype") or {}
+      description = fields.get("description")
+      if isinstance(description, dict):
+        description = _adf_to_text(description)
+      normalized.append(
+        {
+          "id": issue.get("id"),
+          "key": issue.get("key"),
+          "summary": fields.get("summary"),
+          "status": status.get("name"),
+          "assignee": assignee.get("displayName") or assignee.get("emailAddress"),
+          "updated": fields.get("updated"),
+          "priority": priority.get("name"),
+          "type": issuetype.get("name"),
+          "labels": fields.get("labels") or [],
+          "description": description,
+          "url": issue.get("self"),
+        }
+      )
+    return normalized
+
+  async def get_sprints(self, *, max_results: int = 20) -> list[dict[str, Any]]:
+    """Best-effort active/recent sprints via boards API."""
+    try:
+      boards = await self._jira_get(
+        "/rest/agile/1.0/board",
+        {"maxResults": 10},
+      )
+    except Exception:
+      return []
+
+    sprints: list[dict[str, Any]] = []
+    for board in boards.get("values", [])[:5]:
+      board_id = board.get("id")
+      if not board_id:
+        continue
+      try:
+        body = await self._jira_get(
+          f"/rest/agile/1.0/board/{board_id}/sprint",
+          {"state": "active,future", "maxResults": max_results},
+        )
+      except Exception:
+        continue
+      for sprint in body.get("values", []):
+        sprints.append(
+          {
+            "id": sprint.get("id"),
+            "name": sprint.get("name"),
+            "state": sprint.get("state"),
+            "startDate": sprint.get("startDate"),
+            "endDate": sprint.get("endDate"),
+            "board_id": board_id,
+            "board_name": board.get("name"),
+          }
+        )
+    return sprints
+
+
+def _adf_to_text(node: Any) -> str:
+  """Flatten Atlassian Document Format to plain text."""
+  if node is None:
+    return ""
+  if isinstance(node, str):
+    return node
+  if isinstance(node, dict):
+    if node.get("type") == "text":
+      return str(node.get("text") or "")
+    parts = [_adf_to_text(child) for child in node.get("content") or []]
+    return " ".join(part for part in parts if part)
+  if isinstance(node, list):
+    return " ".join(_adf_to_text(item) for item in node)
+  return ""

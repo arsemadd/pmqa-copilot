@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { api } from '../api/client'
-import { Sidebar } from './Sidebar'
+import { TopNav } from './TopNav'
 
 export const AppLayout = () => {
   const [displayName, setDisplayName] = useState('PM')
@@ -14,17 +14,17 @@ export const AppLayout = () => {
           setDisplayName(settings.display_name)
         }
       } catch {
-        // Settings are optional on first boot
+        // optional on first boot
       }
     }
     void load()
   }, [])
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar displayName={displayName} />
-      <main className="min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-6xl px-6 py-8 md:px-10">
+    <div className="flex min-h-screen flex-col bg-white">
+      <TopNav displayName={displayName} />
+      <main className="flex-1">
+        <div className="mx-auto max-w-7xl px-4 py-8 md:px-6">
           <Outlet context={{ displayName, setDisplayName }} />
         </div>
       </main>

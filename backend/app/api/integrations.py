@@ -18,9 +18,20 @@ class PatConnectRequest(BaseModel):
   selected_repos: list[str] = Field(default_factory=list)
 
 
+class SelectedReposRequest(BaseModel):
+  selected_repos: list[str]
+
+
 @router.get("", response_model=list[IntegrationInfo])
 async def list_integrations() -> list[IntegrationInfo]:
   return registry.list_info()
+
+
+@router.get("/auth-methods")
+async def auth_methods() -> dict[str, list[str]]:
+  return {
+    "methods": [AuthMethod.OAUTH.value, AuthMethod.PERSONAL_ACCESS_TOKEN.value],
+  }
 
 
 @router.get("/jira/callback")
@@ -100,10 +111,9 @@ async def disconnect_integration(integration_id: str) -> IntegrationInfo:
 @router.get("/{integration_id}/projects")
 async def get_projects(integration_id: str) -> dict:
   if integration_id != "jira":
-    raise HTTPException(status_code=501, detail="Projects endpoint is only available for Jira in v1.")
+    raise HTTPException(status_code=501, detail="Projects endpoint is only available for Jira.")
   try:
-    jira = registry.get("jira")
-    projects = await jira.get_projects()  # type: ignore[attr-defined]
+    projects = await registry.get("jira").get_projects()  # type: ignore[attr-defined]
     return {"projects": projects}
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -111,8 +121,78 @@ async def get_projects(integration_id: str) -> dict:
     raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@router.get("/auth-methods")
-async def auth_methods() -> dict[str, list[str]]:
-  return {
-    "methods": [AuthMethod.OAUTH.value, AuthMethod.PERSONAL_ACCESS_TOKEN.value],
-  }
+@router.get("/{integration_id}/issues")
+async def get_issues(integration_id: str, jql: str | None = None, max_results: int = 50) -> dict:
+  if integration_id != "jira":
+    raise HTTPException(status_code=501, detail="Issues endpoint is only available for Jira.")
+  try:
+    issues = await registry.get("jira").get_issues(jql=jql, max_results=max_results)  # type: ignore[attr-defined]
+    return {"issues": issues}
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{integration_id}/sprints")
+async def get_sprints(integration_id: str) -> dict:
+  if integration_id != "jira":
+    raise HTTPException(status_code=501, detail="Sprints endpoint is only available for Jira.")
+  try:
+    sprints = await registry.get("jira").get_sprints()  # type: ignore[attr-defined]
+    return {"sprints": sprints}
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{integration_id}/repositories")
+async def get_repositories(integration_id: str) -> dict:
+  if integration_id != "github":
+    raise HTTPException(status_code=501, detail="Repositories endpoint is only available for GitHub.")
+  try:
+    repos = await registry.get("github").get_repositories()  # type: ignore[attr-defined]
+    return {"repositories": repos}
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/{integration_id}/repositories", response_model=IntegrationInfo)
+async def update_repositories(integration_id: str, body: SelectedReposRequest) -> IntegrationInfo:
+  if integration_id != "github":
+    raise HTTPException(status_code=501, detail="Repository selection is only available for GitHub.")
+  try:
+    return await registry.get("github").update_selected_repos(body.selected_repos)  # type: ignore[attr-defined]
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{integration_id}/pull-requests")
+async def get_pull_requests(integration_id: str, state: str = "all", max_results: int = 30) -> dict:
+  if integration_id != "github":
+    raise HTTPException(status_code=501, detail="Pull requests endpoint is only available for GitHub.")
+  try:
+    prs = await registry.get("github").get_pull_requests(state=state, max_results=max_results)  # type: ignore[attr-defined]
+    return {"pull_requests": prs}
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{integration_id}/commits")
+async def get_commits(integration_id: str, max_results: int = 30) -> dict:
+  if integration_id != "github":
+    raise HTTPException(status_code=501, detail="Commits endpoint is only available for GitHub.")
+  try:
+    commits = await registry.get("github").get_commits(max_results=max_results)  # type: ignore[attr-defined]
+    return {"commits": commits}
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc

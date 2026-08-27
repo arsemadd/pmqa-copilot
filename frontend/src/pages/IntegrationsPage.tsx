@@ -2,6 +2,9 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { GitHubReposPanel } from '../components/GitHubReposPanel'
+import { JiraIssuesPreview } from '../components/JiraIssuesPreview'
+import { JiraOAuthSetup } from '../components/JiraOAuthSetup'
 import type { AuthMethod, IntegrationInfo } from '../types'
 
 export const IntegrationsPage = () => {
@@ -10,6 +13,7 @@ export const IntegrationsPage = () => {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [oauthKey, setOauthKey] = useState(0)
   const [searchParams, setSearchParams] = useSearchParams()
 
   const load = useCallback(async () => {
@@ -93,30 +97,30 @@ export const IntegrationsPage = () => {
 
   return (
     <div className="space-y-8">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-ink-muted)]">System</p>
-        <h1 className="font-[family-name:var(--font-display)] text-5xl">Integrations</h1>
-        <p className="max-w-2xl text-[var(--color-ink-muted)]">
-          Connect accounts independently. Features only care that a valid connection exists — not which
-          company or personal account you use.
+      <header>
+        <h1 className="page-title">Integrations</h1>
+        <p className="page-subtitle">
+          Connect accounts independently. Features only care that a valid connection exists.
         </p>
       </header>
 
-      {message ? (
-        <p className="rounded-md border border-[rgba(31,122,77,0.25)] bg-[rgba(31,122,77,0.08)] px-4 py-3 text-sm text-[var(--color-ok)]" role="status">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="rounded-md border border-[rgba(155,44,44,0.25)] bg-[rgba(155,44,44,0.08)] px-4 py-3 text-sm text-[var(--color-bad)]" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {message ? <p className="alert-success" role="status">{message}</p> : null}
+      {error ? <p className="alert-error" role="alert">{error}</p> : null}
 
       {loading ? (
         <p className="text-sm text-[var(--color-ink-muted)]">Loading integrations…</p>
       ) : (
         <div className="space-y-6">
+          {jira && !jira.oauth_configured ? (
+            <JiraOAuthSetup
+              key={oauthKey}
+              onSaved={() => {
+                setOauthKey((k) => k + 1)
+                void load()
+                setMessage('Jira OAuth credentials saved. You can now connect with OAuth.')
+              }}
+            />
+          ) : null}
           {jira ? (
             <IntegrationCard
               integration={jira}
@@ -198,7 +202,7 @@ const IntegrationCard = ({
   }
 
   return (
-    <article className="rounded-xl border border-[var(--color-line)] bg-white/60 p-6 backdrop-blur-sm">
+    <article className="card">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold">{integration.name}</h2>
@@ -237,7 +241,7 @@ const IntegrationCard = ({
               type="button"
               onClick={onTest}
               disabled={busy}
-              className="rounded-md bg-[var(--color-sea)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-sea-bright)] disabled:opacity-50"
+              className="btn-primary disabled:opacity-50"
               aria-label={`Test ${integration.name} connection`}
             >
               Test connection
@@ -255,7 +259,7 @@ const IntegrationCard = ({
               type="button"
               onClick={() => setShowConnectForm(true)}
               disabled={busy}
-              className="rounded-md border border-[var(--color-ink)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-paper-2)] disabled:opacity-50"
+              className="btn-secondary disabled:opacity-50"
               aria-label={`Change ${integration.name} account`}
             >
               Change account
@@ -265,7 +269,7 @@ const IntegrationCard = ({
           <button
             type="button"
             onClick={() => setShowConnectForm(true)}
-            className="rounded-md bg-[var(--color-sea)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-sea-bright)]"
+            className="btn-primary"
             aria-label={`Connect ${integration.name}`}
           >
             Connect {integration.name}
@@ -273,8 +277,13 @@ const IntegrationCard = ({
         )}
       </div>
 
+      {connected && integration.id === 'jira' ? <JiraIssuesPreview onError={onError} /> : null}
+      {connected && integration.id === 'github' ? (
+        <GitHubReposPanel onSaved={() => void onPatConnected()} onError={onError} />
+      ) : null}
+
       {showConnectForm ? (
-        <div className="mt-6 border-t border-[var(--color-line)] pt-5">
+        <div className="mt-6 border-t border-[var(--color-border)] pt-5">
           <fieldset className="space-y-3">
             <legend className="text-sm font-semibold">Authentication</legend>
             <label className="flex items-center gap-2 text-sm">
@@ -286,7 +295,7 @@ const IntegrationCard = ({
               />
               OAuth
               {integration.id === 'jira' && !integration.oauth_configured ? (
-                <span className="text-xs text-[var(--color-warn)]">(configure .env first)</span>
+                <span className="text-xs text-[var(--color-warn)]">(save OAuth credentials above first)</span>
               ) : null}
               {integration.id === 'github' ? (
                 <span className="text-xs text-[var(--color-ink-muted)]">(coming next)</span>
@@ -309,7 +318,7 @@ const IntegrationCard = ({
                 type="button"
                 onClick={onOAuth}
                 disabled={busy || (integration.id === 'jira' && !integration.oauth_configured)}
-                className="rounded-md bg-[var(--color-ink)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="btn-primary disabled:opacity-50"
               >
                 Continue with OAuth
               </button>
@@ -332,7 +341,7 @@ const IntegrationCard = ({
                       type="email"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
-                      className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
+                      className="input-field"
                       aria-label="Atlassian email"
                     />
                   </label>
@@ -345,7 +354,7 @@ const IntegrationCard = ({
                       type="url"
                       value={baseUrl}
                       onChange={(event) => setBaseUrl(event.target.value)}
-                      className="w-full rounded-md border border-[var(--color-line)] bg-white px-3 py-2"
+                      className="input-field"
                       aria-label="Jira site URL"
                     />
                   </label>
@@ -366,7 +375,7 @@ const IntegrationCard = ({
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="rounded-md bg-[var(--color-ink)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  className="btn-primary disabled:opacity-50"
                 >
                   {submitting ? 'Connecting…' : 'Save connection'}
                 </button>

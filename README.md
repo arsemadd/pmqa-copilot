@@ -109,6 +109,8 @@ Encryption key prefers OS keychain (`keyring`); falls back to a machine-derived 
 
 ## Next milestones
 
-1. GitHub OAuth + selected repositories
-2. AI provider settings (OpenAI / Claude / Ollama)
-3. Standup, Release Readiness, and other feature workflows
+1. PRD Checker + Change Impact (PM)
+2. Regression / API QA (QA)
+3. Release Readiness dashboard
+4. GitHub OAuth (PAT + repo selection works today)
+5. Optional: swap BM25 for local embeddings
