@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/.venv/
+backend/venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Local secrets & runtime data
+local/connections/*
+!local/connections/.gitkeep
+local/cache/*
+!local/cache/.gitkeep
+local/settings/*
+!local/settings/.gitkeep
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs / coverage
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Build outputs
+frontend/dist/
+*.local

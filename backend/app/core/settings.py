@@ -1,0 +1,51 @@
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+ROOT_DIR = Path(__file__).resolve().parents[3]
+LOCAL_DIR = ROOT_DIR / "local"
+CONNECTIONS_DIR = LOCAL_DIR / "connections"
+CACHE_DIR = LOCAL_DIR / "cache"
+SETTINGS_DIR = LOCAL_DIR / "settings"
+
+
+class Settings(BaseSettings):
+  model_config = SettingsConfigDict(
+    env_file=str(ROOT_DIR / ".env"),
+    env_file_encoding="utf-8",
+    extra="ignore",
+  )
+
+  pmqa_host: str = "127.0.0.1"
+  pmqa_port: int = 8000
+  pmqa_frontend_url: str = "http://127.0.0.1:5173"
+  pmqa_backend_url: str = "http://127.0.0.1:8000"
+  pmqa_secret_key: str | None = None
+
+  jira_client_id: str = ""
+  jira_client_secret: str = ""
+  jira_redirect_uri: str = "http://127.0.0.1:8000/api/integrations/jira/callback"
+
+  github_client_id: str = ""
+  github_client_secret: str = ""
+  github_redirect_uri: str = "http://127.0.0.1:8000/api/integrations/github/callback"
+
+  @property
+  def cors_origins(self) -> list[str]:
+    return [
+      self.pmqa_frontend_url,
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+    ]
+
+
+@lru_cache
+def get_settings() -> Settings:
+  return Settings()
+
+
+def ensure_local_dirs() -> None:
+  for path in (LOCAL_DIR, CONNECTIONS_DIR, CACHE_DIR, SETTINGS_DIR):
+    path.mkdir(parents=True, exist_ok=True)
