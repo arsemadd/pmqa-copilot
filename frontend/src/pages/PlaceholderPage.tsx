@@ -5,10 +5,11 @@ type PlaceholderPageProps = {
   upcoming: string[]
 }
 
-export const PlaceholderPage = ({ title, description, upcoming }: PlaceholderPageProps) => {
+export const PlaceholderPage = ({ title, eyebrow, description, upcoming }: PlaceholderPageProps) => {
   return (
     <div className="space-y-8">
       <header>
+        <p className="text-xs uppercase tracking-[0.24em] text-[var(--color-ink-muted)]">{eyebrow}</p>
         <h1 className="page-title">{title}</h1>
         <p className="page-subtitle">{description}</p>
       </header>

@@ -94,13 +94,13 @@ export const api = {
       handleResponse<{ issues: Array<Record<string, unknown>> }>(r),
     ),
 
-  getPullRequests: () =>
-    fetch(`${API_BASE}/api/integrations/github/pull-requests`).then((r) =>
+  getPullRequests: (id: string = 'github') =>
+    fetch(`${API_BASE}/api/integrations/${id}/pull-requests`).then((r) =>
       handleResponse<{ pull_requests: Array<Record<string, unknown>> }>(r),
     ),
 
-  getRepositories: () =>
-    fetch(`${API_BASE}/api/integrations/github/repositories`).then((r) =>
+  getRepositories: (id: string = 'github') =>
+    fetch(`${API_BASE}/api/integrations/${id}/repositories`).then((r) =>
       handleResponse<{
         repositories: Array<{
           full_name: string
@@ -112,8 +112,8 @@ export const api = {
       }>(r),
     ),
 
-  updateRepositories: (selected_repos: string[]) =>
-    fetch(`${API_BASE}/api/integrations/github/repositories`, {
+  updateRepositories: (id: string, selected_repos: string[]) =>
+    fetch(`${API_BASE}/api/integrations/${id}/repositories`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ selected_repos }),

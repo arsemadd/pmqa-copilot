@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type GroundedResult } from '../api/client'
-import { GroundedResultView } from './KnowledgePage'
+import { GroundedResultView } from './StandupPage'
 
 export const PmToolsPage = () => {
   const [result, setResult] = useState<GroundedResult | null>(null)

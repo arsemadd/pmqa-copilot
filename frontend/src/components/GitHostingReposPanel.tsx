@@ -9,12 +9,21 @@ type Repo = {
   html_url: string
 }
 
-type GitHubReposPanelProps = {
+type GitHostingReposPanelProps = {
+  integrationId: 'github' | 'gitlab'
+  heading: string
+  description: string
   onSaved: () => void
   onError: (message: string) => void
 }
 
-export const GitHubReposPanel = ({ onSaved, onError }: GitHubReposPanelProps) => {
+export const GitHostingReposPanel = ({
+  integrationId,
+  heading,
+  description,
+  onSaved,
+  onError,
+}: GitHostingReposPanelProps) => {
   const [repos, setRepos] = useState<Repo[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -22,37 +31,37 @@ export const GitHubReposPanel = ({ onSaved, onError }: GitHubReposPanelProps) =>
 
   useEffect(() => {
     const load = async () => {
-      const data = await api.getRepositories()
+      const data = await api.getRepositories(integrationId)
       setRepos(data.repositories)
       setSelected(data.repositories.filter((repo) => repo.selected).map((repo) => repo.full_name))
     }
-    void load().catch((err) => onError(err instanceof Error ? err.message : 'Failed to load repos'))
-  }, [onError])
+    void load().catch((err) => onError(err instanceof Error ? err.message : 'Failed to load projects'))
+  }, [integrationId, onError])
 
   const handleSave = async () => {
     setBusy(true)
     try {
-      await api.updateRepositories('github', selected)
+      await api.updateRepositories(integrationId, selected)
       onSaved()
       if (selected.length) {
-        const prData = await api.getPullRequests()
+        const prData = await api.getPullRequests(integrationId)
         setPrs(prData.pull_requests.slice(0, 8))
       } else {
         setPrs([])
       }
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Failed to save repos')
+      onError(err instanceof Error ? err.message : 'Failed to save selection')
     } finally {
       setBusy(false)
     }
   }
 
+  const prLabel = integrationId === 'gitlab' ? 'MRs' : 'PRs'
+
   return (
     <div className="mt-5 space-y-4 border-t border-[var(--color-line)] pt-5">
-      <h3 className="text-sm font-semibold">Repositories</h3>
-      <p className="text-xs text-[var(--color-ink-muted)]">
-        Only selected repos are accessible to features. Nothing is auto-selected.
-      </p>
+      <h3 className="text-sm font-semibold">{heading}</h3>
+      <p className="text-xs text-[var(--color-ink-muted)]">{description}</p>
       <div className="max-h-56 space-y-2 overflow-auto rounded-md border border-[var(--color-line)] bg-white p-3">
         {repos.map((repo) => (
           <label key={repo.full_name} className="flex items-center gap-2 text-sm">
@@ -78,12 +87,12 @@ export const GitHubReposPanel = ({ onSaved, onError }: GitHubReposPanelProps) =>
         onClick={() => void handleSave()}
         className="btn-primary disabled:opacity-50"
       >
-        Save repo selection
+        Save selection
       </button>
       {prs.length ? (
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-muted)]">
-            Live PRs (sample)
+            Live {prLabel} (sample)
           </h4>
           <ul className="mt-2 space-y-1 text-sm">
             {prs.map((pr) => (

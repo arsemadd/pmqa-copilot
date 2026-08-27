@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import { GitHubReposPanel } from '../components/GitHubReposPanel'
+import { GitHostingReposPanel } from '../components/GitHostingReposPanel'
 import { JiraIssuesPreview } from '../components/JiraIssuesPreview'
 import { JiraOAuthSetup } from '../components/JiraOAuthSetup'
 import type { AuthMethod, IntegrationInfo } from '../types'
@@ -48,6 +48,7 @@ export const IntegrationsPage = () => {
 
   const jira = useMemo(() => integrations.find((item) => item.id === 'jira'), [integrations])
   const github = useMemo(() => integrations.find((item) => item.id === 'github'), [integrations])
+  const gitlab = useMemo(() => integrations.find((item) => item.id === 'gitlab'), [integrations])
 
   const handleOAuthConnect = async (id: string) => {
     setBusyId(id)
@@ -144,6 +145,20 @@ export const IntegrationsPage = () => {
               onTest={() => void handleTest('github')}
               onPatConnected={async () => {
                 setMessage('GitHub connected with Personal Access Token.')
+                await load()
+              }}
+              onError={setError}
+            />
+          ) : null}
+          {gitlab ? (
+            <IntegrationCard
+              integration={gitlab}
+              busy={busyId === 'gitlab'}
+              onOAuth={() => void handleOAuthConnect('gitlab')}
+              onDisconnect={() => void handleDisconnect('gitlab')}
+              onTest={() => void handleTest('gitlab')}
+              onPatConnected={async () => {
+                setMessage('GitLab connected with Personal Access Token.')
                 await load()
               }}
               onError={setError}
@@ -279,7 +294,22 @@ const IntegrationCard = ({
 
       {connected && integration.id === 'jira' ? <JiraIssuesPreview onError={onError} /> : null}
       {connected && integration.id === 'github' ? (
-        <GitHubReposPanel onSaved={() => void onPatConnected()} onError={onError} />
+        <GitHostingReposPanel
+          integrationId="github"
+          heading="Repositories"
+          description="Only selected repos are accessible to features. Nothing is auto-selected."
+          onSaved={() => void onPatConnected()}
+          onError={onError}
+        />
+      ) : null}
+      {connected && integration.id === 'gitlab' ? (
+        <GitHostingReposPanel
+          integrationId="gitlab"
+          heading="Projects"
+          description="Only selected GitLab projects are accessible to features. Nothing is auto-selected."
+          onSaved={() => void onPatConnected()}
+          onError={onError}
+        />
       ) : null}
 
       {showConnectForm ? (
@@ -298,6 +328,9 @@ const IntegrationCard = ({
                 <span className="text-xs text-[var(--color-warn)]">(save OAuth credentials above first)</span>
               ) : null}
               {integration.id === 'github' ? (
+                <span className="text-xs text-[var(--color-ink-muted)]">(coming next)</span>
+              ) : null}
+              {integration.id === 'gitlab' ? (
                 <span className="text-xs text-[var(--color-ink-muted)]">(coming next)</span>
               ) : null}
             </label>
@@ -359,6 +392,21 @@ const IntegrationCard = ({
                     />
                   </label>
                 </>
+              ) : null}
+              {integration.id === 'gitlab' ? (
+                <label className="block text-sm">
+                  <span className="mb-1 block text-[var(--color-ink-muted)]">
+                    GitLab URL (optional — defaults to https://gitlab.com)
+                  </span>
+                  <input
+                    type="url"
+                    value={baseUrl}
+                    onChange={(event) => setBaseUrl(event.target.value)}
+                    placeholder="https://gitlab.com"
+                    className="input-field"
+                    aria-label="GitLab instance URL"
+                  />
+                </label>
               ) : null}
               <label className="block text-sm">
                 <span className="mb-1 block text-[var(--color-ink-muted)]">Personal Access Token</span>

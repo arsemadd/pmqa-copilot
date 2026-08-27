@@ -118,6 +118,75 @@ async def assemble_context(
       except Exception:
         missing.append("github")
 
+  if "gitlab" in requested:
+    gitlab = registry.get("gitlab")
+    if not await gitlab.authenticate():
+      missing.append("gitlab")
+    else:
+      try:
+        selected = gitlab.selected_repos()  # type: ignore[attr-defined]
+        if not selected:
+          missing.append("gitlab (no projects selected)")
+        else:
+          used.append("gitlab")
+          mrs = await gitlab.get_merge_requests(max_results=20)  # type: ignore[attr-defined]
+          commits = await gitlab.get_commits(max_results=20)  # type: ignore[attr-defined]
+          issues = await gitlab.get_issues(max_results=15)  # type: ignore[attr-defined]
+          for mr in mrs:
+            text = (
+              f"MR !{mr.get('number')} in {mr.get('repo')}\n"
+              f"Title: {mr.get('title')}\n"
+              f"State: {mr.get('state')}\n"
+              f"Author: {mr.get('user')}\n"
+              f"Updated: {mr.get('updated_at')}\n"
+              f"Merged: {mr.get('merged_at')}"
+            )
+            chunks.append(
+              ContextChunk(
+                id=f"gitlab:mr:{mr.get('repo')}:{mr.get('number')}",
+                source_type=SourceType.GITLAB,
+                source_label=str(mr.get("repo")),
+                title=f"MR !{mr.get('number')}: {mr.get('title')}",
+                text=text,
+                metadata=mr,
+              )
+            )
+          for commit in commits:
+            chunks.append(
+              ContextChunk(
+                id=f"gitlab:commit:{commit.get('repo')}:{commit.get('sha')}",
+                source_type=SourceType.GITLAB,
+                source_label=str(commit.get("repo")),
+                title=f"{commit.get('sha')} {commit.get('message')}",
+                text=(
+                  f"Commit {commit.get('sha')} in {commit.get('repo')}\n"
+                  f"Author: {commit.get('author')}\n"
+                  f"Date: {commit.get('date')}\n"
+                  f"Message: {commit.get('message')}"
+                ),
+                metadata=commit,
+              )
+            )
+          for issue in issues:
+            chunks.append(
+              ContextChunk(
+                id=f"gitlab:issue:{issue.get('repo')}:{issue.get('number')}",
+                source_type=SourceType.GITLAB,
+                source_label=str(issue.get("repo")),
+                title=f"Issue #{issue.get('number')}: {issue.get('title')}",
+                text=(
+                  f"Issue #{issue.get('number')} in {issue.get('repo')}\n"
+                  f"Title: {issue.get('title')}\n"
+                  f"State: {issue.get('state')}\n"
+                  f"Author: {issue.get('user')}\n"
+                  f"Updated: {issue.get('updated_at')}"
+                ),
+                metadata=issue,
+              )
+            )
+      except Exception:
+        missing.append("gitlab")
+
   if "knowledge" in requested:
     knowledge_hits = search_knowledge(query, top_k=top_k)
     if knowledge_hits:

@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { api, type AISettings } from '../api/client'
+import { DEFAULT_DISPLAY_NAME } from '../constants/app'
 
 type OutletContext = {
   displayName: string
@@ -41,7 +42,7 @@ export const SettingsPage = () => {
   const handleProfile = async (event: FormEvent) => {
     event.preventDefault()
     setError(null)
-    const updated = await api.updateSettings({ display_name: name.trim() || 'PM' })
+    const updated = await api.updateSettings({ display_name: name.trim() || DEFAULT_DISPLAY_NAME })
     setDisplayName(updated.display_name ?? name)
     setMessage('Profile saved.')
   }
@@ -89,6 +90,9 @@ export const SettingsPage = () => {
 
       <form onSubmit={(event) => void handleProfile(event)} className="max-w-lg space-y-4 rounded-xl border border-[var(--color-line)] bg-white/60 p-6">
         <h2 className="text-lg font-semibold">Profile</h2>
+        <p className="text-sm text-[var(--color-ink-muted)]">
+          Used in greetings, navigation labels (e.g. {DEFAULT_DISPLAY_NAME} Tools), and your avatar.
+        </p>
         <label className="block text-sm">
           <span className="mb-1 block text-[var(--color-ink-muted)]">Display name</span>
           <input

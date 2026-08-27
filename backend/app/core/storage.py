@@ -100,18 +100,22 @@ def connection_exists(integration_id: str) -> bool:
   return _connection_path(integration_id).exists()
 
 
+DEFAULT_APP_SETTINGS: dict[str, Any] = {
+  "display_name": "Arsema",
+  "theme": "command-center",
+  "selected_repos": [],
+}
+
+
 def load_app_settings() -> dict[str, Any]:
   path = _settings_path()
   if not path.exists():
-    return {
-      "display_name": "PM",
-      "theme": "command-center",
-      "selected_repos": [],
-    }
+    return dict(DEFAULT_APP_SETTINGS)
   try:
-    return json.loads(path.read_text(encoding="utf-8"))
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    return {**DEFAULT_APP_SETTINGS, **stored}
   except (json.JSONDecodeError, OSError):
-    return {}
+    return dict(DEFAULT_APP_SETTINGS)
 
 
 def save_app_settings(payload: dict[str, Any]) -> dict[str, Any]:

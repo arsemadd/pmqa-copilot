@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useOutletContext } from 'react-router-dom'
 import { AppLayout } from './components/AppLayout'
 import { AskProductPage } from './pages/AskProductPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -7,6 +7,23 @@ import { KnowledgePage } from './pages/KnowledgePage'
 import { PlaceholderPage } from './pages/PlaceholderPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StandupPage } from './pages/StandupPage'
+import { toolsGroupLabel } from './constants/app'
+
+type OutletContext = {
+  displayName: string
+}
+
+const PmOverviewPage = () => {
+  const { displayName } = useOutletContext<OutletContext>()
+  return (
+    <PlaceholderPage
+      eyebrow={toolsGroupLabel(displayName)}
+      title="Product workflows"
+      description="Standup is live. PRD Checker and Change Impact come next."
+      upcoming={['Standup (ready)', 'PRD Checker', 'Change Impact']}
+    />
+  )
+}
 
 export const App = () => {
   return (
@@ -14,17 +31,7 @@ export const App = () => {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
-          <Route
-            path="pm"
-            element={
-              <PlaceholderPage
-                eyebrow="PM Tools"
-                title="Product workflows"
-                description="Standup is live. PRD Checker and Change Impact come next."
-                upcoming={['Standup (ready)', 'PRD Checker', 'Change Impact']}
-              />
-            }
-          />
+          <Route path="pm" element={<PmOverviewPage />} />
           <Route path="pm/standup" element={<StandupPage />} />
           <Route
             path="qa"

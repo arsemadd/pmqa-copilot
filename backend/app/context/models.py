@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 class SourceType(str, Enum):
   JIRA = "jira"
   GITHUB = "github"
+  GITLAB = "gitlab"
   KNOWLEDGE = "knowledge"
 
 
