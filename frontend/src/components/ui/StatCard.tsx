@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 
 type StatCardProps = {
   label: string
@@ -8,6 +9,7 @@ type StatCardProps = {
   trend?: string
   accent?: 'purple' | 'cyan' | 'emerald' | 'amber'
   loading?: boolean
+  to?: string
 }
 
 const accentMap = {
@@ -40,17 +42,19 @@ export const StatCard = ({
   trend,
   accent = 'purple',
   loading,
+  to,
 }: StatCardProps) => {
   const styles = accentMap[accent]
 
-  return (
-    <article
-      className={[
-        'group relative overflow-hidden rounded-2xl border border-[var(--color-border)] bg-white p-5',
-        'shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg',
-        styles.glow,
-      ].join(' ')}
-    >
+  const className = [
+    'group relative block overflow-hidden rounded-2xl border border-[var(--color-border)] bg-white p-5',
+    'shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg',
+    to ? 'cursor-pointer hover:border-violet-200' : '',
+    styles.glow,
+  ].join(' ')
+
+  const inner = (
+    <>
       <div
         className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${styles.bar} opacity-80`}
         aria-hidden
@@ -78,6 +82,16 @@ export const StatCard = ({
           <Icon className="h-5 w-5" aria-hidden />
         </div>
       </div>
-    </article>
+    </>
   )
+
+  if (to) {
+    return (
+      <Link to={to} className={className} aria-label={`${label} — ${trend ?? 'view details'}`}>
+        {inner}
+      </Link>
+    )
+  }
+
+  return <article className={className}>{inner}</article>
 }

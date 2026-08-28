@@ -42,13 +42,14 @@ export const GitHostingReposPanel = ({
     setBusy(true)
     try {
       await api.updateRepositories(integrationId, selected)
-      onSaved()
       if (selected.length) {
+        await api.syncIntegration(integrationId)
         const prData = await api.getPullRequests(integrationId)
         setPrs(prData.pull_requests.slice(0, 8))
       } else {
         setPrs([])
       }
+      onSaved()
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to save selection')
     } finally {

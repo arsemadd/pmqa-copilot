@@ -1,12 +1,14 @@
-"""GitLab integration — PAT with project selection; OAuth later."""
+"""GitLab integration — OAuth or PAT with project selection."""
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 
+from app.core.integration_config import get_gitlab_oauth_config
 from app.core.storage import delete_connection, load_connection, save_connection
 from app.integrations.base import (
   AuthMethod,
@@ -30,6 +32,7 @@ class GitLabIntegration(Integration):
     return [
       Capability.GET_PULL_REQUESTS,
       Capability.GET_COMMITS,
+      Capability.GET_FILES_CHANGED,
       Capability.GET_ISSUES,
       Capability.GET_REPOSITORIES,
     ]
@@ -44,7 +47,8 @@ class GitLabIntegration(Integration):
 
   def get_info(self) -> IntegrationInfo:
     data = load_connection(self.id)
-    if not data or not data.get("pat_token"):
+    oauth_configured = get_gitlab_oauth_config()["configured"]
+    if not self._is_connected(data):
       return IntegrationInfo(
         id=self.id,
         name=self.name,
@@ -52,9 +56,10 @@ class GitLabIntegration(Integration):
         status=ConnectionStatus.NOT_CONNECTED,
         auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
         capabilities=self.get_capabilities(),
-        oauth_configured=False,
+        oauth_configured=oauth_configured,
       )
 
+    assert data is not None
     host = str(data.get("base_url") or DEFAULT_HOST).replace("https://", "").replace("http://", "")
     return IntegrationInfo(
       id=self.id,
@@ -70,16 +75,94 @@ class GitLabIntegration(Integration):
         "selected_repos": data.get("selected_repos", []),
         "base_url": data.get("base_url") or DEFAULT_HOST,
       },
-      oauth_configured=False,
+      oauth_configured=oauth_configured,
     )
 
+  def _is_connected(self, data: dict[str, Any] | None) -> bool:
+    if not data:
+      return False
+    if data.get("auth_method") == AuthMethod.OAUTH.value:
+      return bool(data.get("access_token"))
+    return bool(data.get("pat_token"))
+
   async def start_oauth(self) -> AuthStartResponse:
-    raise NotImplementedError(
-      "GitLab OAuth comes next. Use Personal Access Token and select projects."
+    oauth = get_gitlab_oauth_config()
+    if not oauth["configured"]:
+      raise ValueError(
+        "GitLab OAuth is not configured. Add Application ID and Secret in Integrations → GitLab OAuth setup."
+      )
+
+    state = secrets.token_urlsafe(24)
+    pending = load_connection(self.id) or {}
+    pending["oauth_state"] = state
+    save_connection(self.id, pending)
+
+    base_url = oauth.get("base_url") or DEFAULT_HOST
+    params = urlencode(
+      {
+        "client_id": oauth["client_id"],
+        "redirect_uri": oauth["redirect_uri"],
+        "response_type": "code",
+        "scope": "read_api read_user",
+        "state": state,
+      }
+    )
+    return AuthStartResponse(
+      authorization_url=f"{base_url.rstrip('/')}/oauth/authorize?{params}",
+      state=state,
+      auth_method=AuthMethod.OAUTH,
     )
 
   async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    raise NotImplementedError("GitLab OAuth callback is not implemented yet.")
+    oauth = get_gitlab_oauth_config()
+    pending = load_connection(self.id) or {}
+    expected = pending.get("oauth_state")
+    if not expected or expected != state:
+      raise ValueError("Invalid OAuth state. Restart the GitLab connection flow.")
+
+    base_url = oauth.get("base_url") or DEFAULT_HOST
+    api_base = f"{base_url.rstrip('/')}/api/v4"
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+      token_response = await client.post(
+        f"{base_url.rstrip('/')}/oauth/token",
+        data={
+          "client_id": oauth["client_id"],
+          "client_secret": oauth["client_secret"],
+          "code": code,
+          "grant_type": "authorization_code",
+          "redirect_uri": oauth["redirect_uri"],
+        },
+      )
+      if token_response.status_code >= 400:
+        raise ValueError(f"GitLab token exchange failed ({token_response.status_code}): {token_response.text}")
+      tokens = token_response.json()
+      access_token = tokens.get("access_token")
+      if not access_token:
+        raise ValueError("GitLab token exchange did not return an access token.")
+
+      user_response = await client.get(
+        f"{api_base}/user",
+        headers={"Authorization": f"Bearer {access_token}"},
+      )
+      user_response.raise_for_status()
+      user = user_response.json()
+
+    existing = load_connection(self.id) or {}
+    payload = {
+      "auth_method": AuthMethod.OAUTH.value,
+      "access_token": access_token,
+      "refresh_token": tokens.get("refresh_token"),
+      "token_type": tokens.get("token_type", "Bearer"),
+      "base_url": base_url.rstrip("/"),
+      "api_base": api_base,
+      "account_login": user.get("username"),
+      "account_label": user.get("username"),
+      "account_name": user.get("name"),
+      "selected_repos": existing.get("selected_repos") or [],
+    }
+    save_connection(self.id, payload)
+    return self.get_info()
 
   async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
     if not token:
@@ -120,7 +203,7 @@ class GitLabIntegration(Integration):
 
   async def authenticate(self) -> bool:
     data = load_connection(self.id)
-    return bool(data and data.get("pat_token"))
+    return self._is_connected(data)
 
   async def test_connection(self) -> TestConnectionResult:
     data = load_connection(self.id)
@@ -131,7 +214,7 @@ class GitLabIntegration(Integration):
       async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
           f"{self._api_base(data)}/user",
-          headers={"PRIVATE-TOKEN": data["pat_token"]},
+          headers=self._headers(),
         )
         response.raise_for_status()
         user = response.json()
@@ -149,9 +232,13 @@ class GitLabIntegration(Integration):
 
   def _headers(self) -> dict[str, str]:
     data = load_connection(self.id)
-    if not data or not data.get("pat_token"):
+    if not data:
       raise ValueError("GitLab is not connected.")
-    return {"PRIVATE-TOKEN": data["pat_token"]}
+    if data.get("auth_method") == AuthMethod.OAUTH.value and data.get("access_token"):
+      return {"Authorization": f"Bearer {data['access_token']}"}
+    if data.get("pat_token"):
+      return {"PRIVATE-TOKEN": data["pat_token"]}
+    raise ValueError("GitLab is not connected.")
 
   def selected_repos(self) -> list[str]:
     data = load_connection(self.id) or {}
@@ -319,3 +406,31 @@ class GitLabIntegration(Integration):
           )
     results.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
     return results[:max_results]
+
+  async def get_files_changed(self, *, pr_number: int, repo: str | None = None) -> list[dict[str, Any]]:
+    target_repo = repo or (self.selected_repos()[0] if self.selected_repos() else None)
+    if not target_repo:
+      raise ValueError("Provide a project or select projects first.")
+
+    data = load_connection(self.id) or {}
+    api_base = self._api_base(data)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+      response = await client.get(
+        f"{api_base}/projects/{self._encode_project(target_repo)}/merge_requests/{pr_number}/changes",
+        headers=self._headers(),
+      )
+      response.raise_for_status()
+      body = response.json()
+
+    return [
+      {
+        "repo": target_repo,
+        "filename": item.get("new_path") or item.get("old_path"),
+        "status": "renamed" if item.get("renamed_file") else "modified",
+        "additions": None,
+        "deletions": None,
+        "changes": None,
+      }
+      for item in body.get("changes") or []
+    ]

@@ -154,6 +154,16 @@ def ingest_document(
   return entry
 
 
+def get_chunks_for_documents(document_ids: list[str], *, max_chunks: int = 48) -> list[dict[str, Any]]:
+  if not document_ids:
+    return []
+  allowed = set(document_ids)
+  chunks = _load_json(CHUNKS_PATH)
+  matched = [item for item in chunks if str(item.get("document_id")) in allowed]
+  matched.sort(key=lambda item: (str(item.get("document_id")), int(item.get("index") or 0)))
+  return matched[:max_chunks]
+
+
 def delete_document(document_id: str) -> bool:
   ensure_knowledge_dirs()
   manifest = _load_json(MANIFEST_PATH)

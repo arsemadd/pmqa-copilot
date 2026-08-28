@@ -139,6 +139,54 @@ export const api = {
       body: JSON.stringify(payload),
     }).then((r) => handleResponse<Record<string, unknown>>(r)),
 
+  getGitHubOAuth: () =>
+    fetch(`${API_BASE}/api/settings/github-oauth`).then((r) =>
+      handleResponse<{
+        configured: boolean
+        client_id_set: boolean
+        client_secret_set: boolean
+        redirect_uri: string
+      }>(r),
+    ),
+
+  saveGitHubOAuth: (payload: { client_id: string; client_secret?: string; redirect_uri?: string }) =>
+    fetch(`${API_BASE}/api/settings/github-oauth`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<Record<string, unknown>>(r)),
+
+  getGitLabOAuth: () =>
+    fetch(`${API_BASE}/api/settings/gitlab-oauth`).then((r) =>
+      handleResponse<{
+        configured: boolean
+        client_id_set: boolean
+        client_secret_set: boolean
+        redirect_uri: string
+        base_url?: string
+      }>(r),
+    ),
+
+  saveGitLabOAuth: (payload: {
+    client_id: string
+    client_secret?: string
+    redirect_uri?: string
+    base_url?: string
+  }) =>
+    fetch(`${API_BASE}/api/settings/gitlab-oauth`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<Record<string, unknown>>(r)),
+
+  syncIntegration: (id: string) =>
+    fetch(`${API_BASE}/api/integrations/${id}/sync`, { method: 'POST' }).then((r) =>
+      handleResponse<Record<string, unknown>>(r),
+    ),
+
+  getSyncCache: (id: string) =>
+    fetch(`${API_BASE}/api/integrations/${id}/sync`).then((r) => handleResponse<Record<string, unknown>>(r)),
+
   updateSettings: (payload: AppSettings) =>
     fetch(`${API_BASE}/api/settings`, {
       method: 'PUT',
@@ -160,6 +208,17 @@ export const api = {
     form.append('tags', tags)
     return fetch(`${API_BASE}/api/knowledge/documents`, { method: 'POST', body: form }).then((r) =>
       handleResponse<{ document: KnowledgeDocument }>(r),
+    )
+  },
+
+  uploadDocumentsBatch: async (files: File[], tags: string) => {
+    const form = new FormData()
+    for (const file of files) {
+      form.append('files', file)
+    }
+    form.append('tags', tags)
+    return fetch(`${API_BASE}/api/knowledge/documents/batch`, { method: 'POST', body: form }).then((r) =>
+      handleResponse<{ documents: KnowledgeDocument[]; errors: string[] }>(r),
     )
   },
 
@@ -212,10 +271,54 @@ export const api = {
       body: JSON.stringify({ query: query || 'Generate standup from recent work.' }),
     }).then((r) => handleResponse<GroundedResult>(r)),
 
-  askProduct: (query: string, sources: string[]) =>
+  askProduct: (payload: {
+    query: string
+    sources: string[]
+    document_ids?: string[]
+    chat_context?: string
+  }) =>
     fetch(`${API_BASE}/api/features/ask`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, sources }),
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<GroundedResult>(r)),
+
+  runPrdChecker: (payload: {
+    query: string
+    document_ids: string[]
+    chat_context?: string
+    sources?: string[]
+  }) =>
+    fetch(`${API_BASE}/api/features/prd-checker`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<GroundedResult>(r)),
+
+  runChangeImpact: (payload: {
+    query: string
+    document_ids: string[]
+    chat_context?: string
+    sources?: string[]
+  }) =>
+    fetch(`${API_BASE}/api/features/change-impact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((r) => handleResponse<GroundedResult>(r)),
+
+  runQaFeature: (
+    featureKey: string,
+    payload: {
+      query: string
+      document_ids: string[]
+      chat_context?: string
+      sources?: string[]
+    },
+  ) =>
+    fetch(`${API_BASE}/api/features/qa/${featureKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     }).then((r) => handleResponse<GroundedResult>(r)),
 }

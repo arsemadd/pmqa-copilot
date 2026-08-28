@@ -38,6 +38,31 @@ async def upload_document(
   return {"document": entry}
 
 
+@router.post("/documents/batch")
+async def upload_documents_batch(
+  files: list[UploadFile] = File(...),
+  tags: str = Form(default=""),
+) -> dict[str, Any]:
+  if not files:
+    raise HTTPException(status_code=400, detail="At least one file is required.")
+  tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+  uploaded: list[dict[str, Any]] = []
+  errors: list[str] = []
+  for file in files:
+    raw = await file.read()
+    if not raw:
+      errors.append(f"{file.filename or 'file'}: empty")
+      continue
+    try:
+      entry = ingest_document(filename=file.filename or "upload.txt", raw=raw, tags=tag_list)
+      uploaded.append(entry)
+    except ValueError as exc:
+      errors.append(f"{file.filename or 'file'}: {exc}")
+  if not uploaded:
+    raise HTTPException(status_code=400, detail="; ".join(errors) or "Upload failed")
+  return {"documents": uploaded, "errors": errors}
+
+
 @router.delete("/documents/{document_id}")
 async def remove_document(document_id: str) -> dict[str, Any]:
   ok = delete_document(document_id)

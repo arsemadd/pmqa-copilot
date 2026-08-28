@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { GitHostingReposPanel } from '../components/GitHostingReposPanel'
 import { JiraIssuesPreview } from '../components/JiraIssuesPreview'
 import { JiraOAuthSetup } from '../components/JiraOAuthSetup'
+import { OAuthSetup } from '../components/OAuthSetup'
 import type { AuthMethod, IntegrationInfo } from '../types'
 
 export const IntegrationsPage = () => {
@@ -34,17 +35,32 @@ export const IntegrationsPage = () => {
   }, [load])
 
   useEffect(() => {
-    const jiraStatus = searchParams.get('jira')
-    const rawMessage = searchParams.get('message')
-    if (jiraStatus === 'connected') {
-      setMessage('Jira connected successfully.')
-      setSearchParams({}, { replace: true })
-      void load()
-    } else if (jiraStatus === 'error') {
-      setError(rawMessage ? decodeURIComponent(rawMessage) : 'Jira OAuth failed.')
-      setSearchParams({}, { replace: true })
+    const handleCallback = (key: 'jira' | 'github' | 'gitlab', label: string) => {
+      const status = searchParams.get(key)
+      const rawMessage = searchParams.get('message')
+      if (status === 'connected') {
+        setMessage(`${label} connected successfully. Live data synced.`)
+        setSearchParams({}, { replace: true })
+        void load()
+      } else if (status === 'error') {
+        setError(rawMessage ? decodeURIComponent(rawMessage) : `${label} OAuth failed.`)
+        setSearchParams({}, { replace: true })
+      }
     }
+    handleCallback('jira', 'Jira')
+    handleCallback('github', 'GitHub')
+    handleCallback('gitlab', 'GitLab')
   }, [searchParams, setSearchParams, load])
+
+  const handlePatConnected = async (id: string, label: string) => {
+    try {
+      await api.syncIntegration(id)
+      setMessage(`${label} connected. Live data synced.`)
+    } catch {
+      setMessage(`${label} connected. Select repos/projects to sync data.`)
+    }
+    await load()
+  }
 
   const jira = useMemo(() => integrations.find((item) => item.id === 'jira'), [integrations])
   const github = useMemo(() => integrations.find((item) => item.id === 'github'), [integrations])
@@ -122,6 +138,37 @@ export const IntegrationsPage = () => {
               }}
             />
           ) : null}
+          {github && !github.oauth_configured ? (
+            <OAuthSetup
+              key={`github-${oauthKey}`}
+              provider="github"
+              title="GitHub OAuth"
+              docsUrl="https://github.com/settings/developers"
+              docsLabel="github.com/settings/developers"
+              defaultRedirect="http://127.0.0.1:8000/api/integrations/github/callback"
+              onSaved={() => {
+                setOauthKey((k) => k + 1)
+                void load()
+                setMessage('GitHub OAuth credentials saved. You can now connect with OAuth.')
+              }}
+            />
+          ) : null}
+          {gitlab && !gitlab.oauth_configured ? (
+            <OAuthSetup
+              key={`gitlab-${oauthKey}`}
+              provider="gitlab"
+              title="GitLab OAuth"
+              docsUrl="https://gitlab.com/-/user_settings/applications"
+              docsLabel="gitlab.com user applications"
+              defaultRedirect="http://127.0.0.1:8000/api/integrations/gitlab/callback"
+              showBaseUrl
+              onSaved={() => {
+                setOauthKey((k) => k + 1)
+                void load()
+                setMessage('GitLab OAuth credentials saved. You can now connect with OAuth.')
+              }}
+            />
+          ) : null}
           {jira ? (
             <IntegrationCard
               integration={jira}
@@ -129,10 +176,7 @@ export const IntegrationsPage = () => {
               onOAuth={() => void handleOAuthConnect('jira')}
               onDisconnect={() => void handleDisconnect('jira')}
               onTest={() => void handleTest('jira')}
-              onPatConnected={async () => {
-                setMessage('Jira connected with Personal Access Token.')
-                await load()
-              }}
+              onPatConnected={() => handlePatConnected('jira', 'Jira')}
               onError={setError}
             />
           ) : null}
@@ -143,10 +187,7 @@ export const IntegrationsPage = () => {
               onOAuth={() => void handleOAuthConnect('github')}
               onDisconnect={() => void handleDisconnect('github')}
               onTest={() => void handleTest('github')}
-              onPatConnected={async () => {
-                setMessage('GitHub connected with Personal Access Token.')
-                await load()
-              }}
+              onPatConnected={() => handlePatConnected('github', 'GitHub')}
               onError={setError}
             />
           ) : null}
@@ -157,10 +198,7 @@ export const IntegrationsPage = () => {
               onOAuth={() => void handleOAuthConnect('gitlab')}
               onDisconnect={() => void handleDisconnect('gitlab')}
               onTest={() => void handleTest('gitlab')}
-              onPatConnected={async () => {
-                setMessage('GitLab connected with Personal Access Token.')
-                await load()
-              }}
+              onPatConnected={() => handlePatConnected('gitlab', 'GitLab')}
               onError={setError}
             />
           ) : null}
@@ -327,11 +365,8 @@ const IntegrationCard = ({
               {integration.id === 'jira' && !integration.oauth_configured ? (
                 <span className="text-xs text-[var(--color-warn)]">(save OAuth credentials above first)</span>
               ) : null}
-              {integration.id === 'github' ? (
-                <span className="text-xs text-[var(--color-ink-muted)]">(coming next)</span>
-              ) : null}
-              {integration.id === 'gitlab' ? (
-                <span className="text-xs text-[var(--color-ink-muted)]">(coming next)</span>
+              {(integration.id === 'github' || integration.id === 'gitlab') && !integration.oauth_configured ? (
+                <span className="text-xs text-[var(--color-warn)]">(save OAuth credentials above first)</span>
               ) : null}
             </label>
             <label className="flex items-center gap-2 text-sm">
@@ -350,7 +385,7 @@ const IntegrationCard = ({
               <button
                 type="button"
                 onClick={onOAuth}
-                disabled={busy || (integration.id === 'jira' && !integration.oauth_configured)}
+                disabled={busy || !integration.oauth_configured}
                 className="btn-primary disabled:opacity-50"
               >
                 Continue with OAuth

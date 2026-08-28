@@ -1,11 +1,14 @@
-"""GitHub integration — PAT with repo selection; OAuth later."""
+"""GitHub integration — OAuth or PAT with repo selection."""
 
 from __future__ import annotations
 
+import secrets
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
+from app.core.integration_config import get_github_oauth_config
 from app.core.storage import delete_connection, load_connection, save_connection
 from app.integrations.base import (
   AuthMethod,
@@ -18,6 +21,9 @@ from app.integrations.base import (
 )
 
 API = "https://api.github.com"
+GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
+GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
+GITHUB_SCOPES = "repo read:user"
 HEADERS_BASE = {
   "Accept": "application/vnd.github+json",
   "X-GitHub-Api-Version": "2022-11-28",
@@ -39,7 +45,8 @@ class GitHubIntegration(Integration):
 
   def get_info(self) -> IntegrationInfo:
     data = load_connection(self.id)
-    if not data or not data.get("pat_token"):
+    oauth_configured = get_github_oauth_config()["configured"]
+    if not self._is_connected(data):
       return IntegrationInfo(
         id=self.id,
         name=self.name,
@@ -47,9 +54,10 @@ class GitHubIntegration(Integration):
         status=ConnectionStatus.NOT_CONNECTED,
         auth_methods=[AuthMethod.OAUTH, AuthMethod.PERSONAL_ACCESS_TOKEN],
         capabilities=self.get_capabilities(),
-        oauth_configured=False,
+        oauth_configured=oauth_configured,
       )
 
+    assert data is not None
     return IntegrationInfo(
       id=self.id,
       name=self.name,
@@ -63,16 +71,91 @@ class GitHubIntegration(Integration):
         "auth_method": data.get("auth_method"),
         "selected_repos": data.get("selected_repos", []),
       },
-      oauth_configured=False,
+      oauth_configured=oauth_configured,
     )
 
+  def _is_connected(self, data: dict[str, Any] | None) -> bool:
+    if not data:
+      return False
+    if data.get("auth_method") == AuthMethod.PERSONAL_ACCESS_TOKEN.value:
+      return bool(data.get("pat_token"))
+    if data.get("auth_method") == AuthMethod.OAUTH.value:
+      return bool(data.get("access_token"))
+    return bool(data.get("pat_token") or data.get("access_token"))
+
   async def start_oauth(self) -> AuthStartResponse:
-    raise NotImplementedError(
-      "GitHub OAuth comes next. Use Personal Access Token and select repositories."
+    oauth = get_github_oauth_config()
+    if not oauth["configured"]:
+      raise ValueError(
+        "GitHub OAuth is not configured. Add Client ID and Secret in Integrations → GitHub OAuth setup, "
+        "or set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in .env"
+      )
+
+    state = secrets.token_urlsafe(24)
+    pending = load_connection(self.id) or {}
+    pending["oauth_state"] = state
+    save_connection(self.id, pending)
+
+    params = urlencode(
+      {
+        "client_id": oauth["client_id"],
+        "redirect_uri": oauth["redirect_uri"],
+        "scope": GITHUB_SCOPES,
+        "state": state,
+      }
+    )
+    return AuthStartResponse(
+      authorization_url=f"{GITHUB_AUTHORIZE_URL}?{params}",
+      state=state,
+      auth_method=AuthMethod.OAUTH,
     )
 
   async def handle_oauth_callback(self, code: str, state: str) -> IntegrationInfo:
-    raise NotImplementedError("GitHub OAuth callback is not implemented yet.")
+    oauth = get_github_oauth_config()
+    pending = load_connection(self.id) or {}
+    expected = pending.get("oauth_state")
+    if not expected or expected != state:
+      raise ValueError("Invalid OAuth state. Restart the GitHub connection flow.")
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+      token_response = await client.post(
+        GITHUB_TOKEN_URL,
+        headers={"Accept": "application/json"},
+        json={
+          "client_id": oauth["client_id"],
+          "client_secret": oauth["client_secret"],
+          "code": code,
+          "redirect_uri": oauth["redirect_uri"],
+        },
+      )
+      if token_response.status_code >= 400:
+        raise ValueError(f"GitHub token exchange failed ({token_response.status_code}): {token_response.text}")
+      tokens = token_response.json()
+      access_token = tokens.get("access_token")
+      if not access_token:
+        raise ValueError("GitHub token exchange did not return an access token.")
+
+      user_response = await client.get(
+        f"{API}/user",
+        headers={**HEADERS_BASE, "Authorization": f"Bearer {access_token}"},
+      )
+      user_response.raise_for_status()
+      user = user_response.json()
+
+    existing = load_connection(self.id) or {}
+    selected_repos = existing.get("selected_repos") or []
+    payload = {
+      "auth_method": AuthMethod.OAUTH.value,
+      "access_token": access_token,
+      "token_type": tokens.get("token_type", "bearer"),
+      "scope": tokens.get("scope"),
+      "account_login": user.get("login"),
+      "account_label": user.get("login"),
+      "account_name": user.get("name"),
+      "selected_repos": selected_repos,
+    }
+    save_connection(self.id, payload)
+    return self.get_info()
 
   async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
     if not token:
@@ -108,19 +191,16 @@ class GitHubIntegration(Integration):
 
   async def authenticate(self) -> bool:
     data = load_connection(self.id)
-    return bool(data and data.get("pat_token"))
+    return self._is_connected(data)
 
   async def test_connection(self) -> TestConnectionResult:
     data = load_connection(self.id)
-    if not data:
+    if not data or not self._is_connected(data):
       return TestConnectionResult(ok=False, message="GitHub is not connected.")
 
     try:
       async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(
-          f"{API}/user",
-          headers={**HEADERS_BASE, "Authorization": f"Bearer {data['pat_token']}"},
-        )
+        response = await client.get(f"{API}/user", headers=self._headers())
         response.raise_for_status()
         user = response.json()
       return TestConnectionResult(
@@ -129,16 +209,24 @@ class GitHubIntegration(Integration):
         details={
           "login": user.get("login"),
           "selected_repos": data.get("selected_repos", []),
+          "auth_method": data.get("auth_method"),
         },
       )
     except Exception as exc:
       return TestConnectionResult(ok=False, message=str(exc))
 
-  def _headers(self) -> dict[str, str]:
+  def _token(self) -> str:
     data = load_connection(self.id)
-    if not data or not data.get("pat_token"):
+    if not data:
       raise ValueError("GitHub is not connected.")
-    return {**HEADERS_BASE, "Authorization": f"Bearer {data['pat_token']}"}
+    if data.get("auth_method") == AuthMethod.OAUTH.value and data.get("access_token"):
+      return str(data["access_token"])
+    if data.get("pat_token"):
+      return str(data["pat_token"])
+    raise ValueError("GitHub is not connected.")
+
+  def _headers(self) -> dict[str, str]:
+    return {**HEADERS_BASE, "Authorization": f"Bearer {self._token()}"}
 
   def selected_repos(self) -> list[str]:
     data = load_connection(self.id) or {}

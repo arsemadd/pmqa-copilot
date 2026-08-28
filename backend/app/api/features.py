@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.ai.logging import list_logs
 from app.ai.providers.factory import get_ai_settings
@@ -26,6 +26,15 @@ class AISettingsUpdate(BaseModel):
 class GroundedRequest(BaseModel):
   query: str = "Generate standup from recent work."
   sources: list[str] | None = None
+  document_ids: list[str] | None = None
+  chat_context: str | None = None
+
+
+class FeatureWorkspaceRequest(BaseModel):
+  query: str = Field(min_length=1)
+  sources: list[str] | None = None
+  document_ids: list[str] = Field(default_factory=list)
+  chat_context: str | None = None
 
 
 class TemplateUpdate(BaseModel):
@@ -126,6 +135,86 @@ async def ask_product(body: GroundedRequest) -> dict[str, Any]:
       feature="ask_product",
       query=body.query,
       sources=body.sources,
+      document_ids=body.document_ids,
+      chat_context=body.chat_context,
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/features/prd-checker")
+async def prd_checker(body: FeatureWorkspaceRequest) -> dict[str, Any]:
+  if not body.document_ids:
+    raise HTTPException(status_code=400, detail="Upload at least one PRD or spec file.")
+  try:
+    return await run_grounded_feature(
+      feature="prd_checker",
+      query=body.query,
+      sources=body.sources or ["knowledge"],
+      document_ids=body.document_ids,
+      chat_context=body.chat_context,
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/features/change-impact")
+async def change_impact(body: FeatureWorkspaceRequest) -> dict[str, Any]:
+  sources = body.sources or []
+  if not body.document_ids and not sources:
+    raise HTTPException(
+      status_code=400,
+      detail="Upload files and/or enable live sources (Jira, GitHub, GitLab).",
+    )
+  try:
+    return await run_grounded_feature(
+      feature="change_impact",
+      query=body.query,
+      sources=body.sources or ["jira", "github", "knowledge"],
+      document_ids=body.document_ids,
+      chat_context=body.chat_context,
+    )
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+  except Exception as exc:
+    raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+QA_FEATURE_KEYS = {
+  "regression",
+  "api_qa",
+  "visual_qa",
+  "smart_test_data",
+  "release_readiness",
+}
+
+QA_DEFAULT_SOURCES: dict[str, list[str]] = {
+  "regression": ["jira", "github", "gitlab", "knowledge"],
+  "api_qa": ["knowledge", "github", "gitlab"],
+  "visual_qa": ["knowledge", "jira"],
+  "smart_test_data": ["knowledge"],
+  "release_readiness": ["jira", "github", "gitlab", "knowledge"],
+}
+
+
+@router.post("/features/qa/{feature_key}")
+async def qa_feature(feature_key: str, body: FeatureWorkspaceRequest) -> dict[str, Any]:
+  if feature_key not in QA_FEATURE_KEYS:
+    raise HTTPException(status_code=404, detail=f"Unknown QA feature: {feature_key}")
+  sources = body.sources or QA_DEFAULT_SOURCES.get(feature_key, ["knowledge"])
+  if not body.document_ids and not sources:
+    raise HTTPException(status_code=400, detail="Upload files and/or enable live sources.")
+  try:
+    return await run_grounded_feature(
+      feature=feature_key,
+      query=body.query,
+      sources=sources,
+      document_ids=body.document_ids,
+      chat_context=body.chat_context,
     )
   except ValueError as exc:
     raise HTTPException(status_code=400, detail=str(exc)) from exc

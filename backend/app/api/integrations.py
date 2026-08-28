@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.core.settings import get_settings
 from app.integrations.base import AuthMethod, IntegrationInfo, TestConnectionResult
 from app.integrations.registry import GIT_HOSTING_IDS, registry
+from app.integrations.sync import load_sync_cache, sync_integration
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -55,10 +56,49 @@ async def jira_oauth_callback(code: str | None = None, state: str | None = None,
 
   try:
     await registry.get("jira").handle_oauth_callback(code, state)
+    await sync_integration("jira")
   except Exception as exc:
     return RedirectResponse(f"{frontend}/integrations?jira=error&message={quote(str(exc))}")
 
   return RedirectResponse(f"{frontend}/integrations?jira=connected")
+
+
+@router.get("/github/callback")
+async def github_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+  settings = get_settings()
+  frontend = settings.pmqa_frontend_url.rstrip("/")
+
+  if error:
+    return RedirectResponse(f"{frontend}/integrations?github=error&message={quote(error)}")
+  if not code or not state:
+    return RedirectResponse(f"{frontend}/integrations?github=error&message=missing_code")
+
+  try:
+    await registry.get("github").handle_oauth_callback(code, state)
+    await sync_integration("github")
+  except Exception as exc:
+    return RedirectResponse(f"{frontend}/integrations?github=error&message={quote(str(exc))}")
+
+  return RedirectResponse(f"{frontend}/integrations?github=connected")
+
+
+@router.get("/gitlab/callback")
+async def gitlab_oauth_callback(code: str | None = None, state: str | None = None, error: str | None = None):
+  settings = get_settings()
+  frontend = settings.pmqa_frontend_url.rstrip("/")
+
+  if error:
+    return RedirectResponse(f"{frontend}/integrations?gitlab=error&message={quote(error)}")
+  if not code or not state:
+    return RedirectResponse(f"{frontend}/integrations?gitlab=error&message=missing_code")
+
+  try:
+    await registry.get("gitlab").handle_oauth_callback(code, state)
+    await sync_integration("gitlab")
+  except Exception as exc:
+    return RedirectResponse(f"{frontend}/integrations?gitlab=error&message={quote(str(exc))}")
+
+  return RedirectResponse(f"{frontend}/integrations?gitlab=connected")
 
 
 @router.get("/{integration_id}", response_model=IntegrationInfo)
@@ -87,12 +127,18 @@ async def start_oauth(integration_id: str) -> dict:
 async def connect_with_pat(integration_id: str, body: PatConnectRequest) -> IntegrationInfo:
   try:
     integration = registry.get(integration_id)
-    return await integration.connect_with_pat(
+    info = await integration.connect_with_pat(
       body.token,
       email=body.email,
       base_url=body.base_url,
       selected_repos=body.selected_repos,
     )
+    if await integration.authenticate():
+      try:
+        await sync_integration(integration_id)
+      except Exception:
+        pass
+    return info
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
   except ValueError as exc:
@@ -184,7 +230,12 @@ async def get_repositories(integration_id: str) -> dict:
 async def update_repositories(integration_id: str, body: SelectedReposRequest) -> IntegrationInfo:
   try:
     integration = _require_git_hosting(integration_id)
-    return await integration.update_selected_repos(body.selected_repos)  # type: ignore[attr-defined]
+    info = await integration.update_selected_repos(body.selected_repos)  # type: ignore[attr-defined]
+    try:
+      await sync_integration(integration_id)
+    except Exception:
+      pass
+    return info
   except HTTPException:
     raise
   except KeyError as exc:
@@ -219,3 +270,39 @@ async def get_commits(integration_id: str, max_results: int = 30) -> dict:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
   except ValueError as exc:
     raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{integration_id}/files-changed")
+async def get_files_changed(
+  integration_id: str,
+  pr_number: int,
+  repo: str | None = None,
+) -> dict:
+  if integration_id not in GIT_HOSTING_IDS:
+    raise HTTPException(status_code=501, detail="Files-changed endpoint is only available for GitHub and GitLab.")
+  try:
+    integration = registry.get(integration_id)
+    files = await integration.get_files_changed(pr_number=pr_number, repo=repo)  # type: ignore[attr-defined]
+    return {"files": files}
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{integration_id}/sync")
+async def sync_integration_data(integration_id: str) -> dict:
+  try:
+    return await sync_integration(integration_id)
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{integration_id}/sync")
+async def get_sync_cache(integration_id: str) -> dict:
+  cached = load_sync_cache(integration_id)
+  if not cached:
+    raise HTTPException(status_code=404, detail="No sync cache yet. Connect and sync first.")
+  return cached

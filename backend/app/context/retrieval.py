@@ -7,8 +7,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.context.knowledge import load_chunks
+from app.context.knowledge import get_chunks_for_documents, load_chunks
 from app.context.models import ContextChunk, SourceType
+
+
+def chunks_from_documents(document_ids: list[str], *, max_chunks: int = 48) -> list[ContextChunk]:
+  return [_to_chunk(item, score=None) for item in get_chunks_for_documents(document_ids, max_chunks=max_chunks)]
 
 
 def search_knowledge(query: str, *, top_k: int = 8, tags: list[str] | None = None) -> list[ContextChunk]:

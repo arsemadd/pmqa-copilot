@@ -3,7 +3,9 @@ import {
   ArrowRight,
   Bot,
   Brain,
+  FileSearch,
   GitBranch,
+  GitCompareArrows,
   Kanban,
   LayoutGrid,
   MessageSquare,
@@ -126,6 +128,7 @@ export const DashboardPage = () => {
           icon={Plug}
           accent="cyan"
           trend={connectedCount === totalIntegrations && totalIntegrations > 0 ? 'All sources linked' : 'Connect Jira, GitHub & GitLab'}
+          to="/integrations"
         />
         <StatCard
           label="AI Provider"
@@ -134,6 +137,7 @@ export const DashboardPage = () => {
           accent={aiConfigured ? 'purple' : 'amber'}
           trend={aiConfigured ? 'Ready for grounded runs' : 'Add key in Settings'}
           loading={aiConfigured === null}
+          to="/settings"
         />
         <StatCard
           label="Grounding"
@@ -141,6 +145,7 @@ export const DashboardPage = () => {
           icon={Zap}
           accent="purple"
           trend="Live + document context"
+          to="/knowledge"
         />
       </section>
 
@@ -160,24 +165,42 @@ export const DashboardPage = () => {
             gradient="from-violet-600 to-purple-600"
           />
           <QuickActionCard
+            to="/pm/prd-checker"
+            title="PRD Checker"
+            description="Upload multiple PRDs, chat for focus, get a scored review."
+            icon={FileSearch}
+            badge="New"
+            gradient="from-purple-600 to-fuchsia-600"
+          />
+          <QuickActionCard
+            to="/pm/change-impact"
+            title="Change Impact"
+            description="Map tickets, PRs, and docs affected by a change."
+            icon={GitCompareArrows}
+            badge="New"
+            gradient="from-indigo-600 to-violet-600"
+          />
+          <QuickActionCard
             to="/knowledge/ask"
             title="Ask My Product"
             description="Query connected sources with citations per answer."
             icon={MessageSquare}
             badge="AI"
-            gradient="from-indigo-600 to-violet-600"
+            gradient="from-cyan-600 to-teal-600"
           />
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <QuickActionCard
             to="/knowledge"
             title="Upload Knowledge"
             description="Ingest PRDs, specs, and docs for retrieval."
             icon={LayoutGrid}
-            gradient="from-cyan-600 to-teal-600"
+            gradient="from-teal-600 to-emerald-600"
           />
           <QuickActionCard
             to="/integrations"
             title="Connect Sources"
-            description="Jira OAuth, GitHub PAT, repo selection."
+            description="Jira OAuth, GitHub PAT, GitLab PAT."
             icon={GitBranch}
             gradient="from-fuchsia-600 to-pink-600"
           />
