@@ -67,14 +67,14 @@ App: http://127.0.0.1:5173
 
    `http://127.0.0.1:8000/api/integrations/jira/callback`
 
-4. Add scopes (minimum):
-   - `read:jira-work`
-   - `read:jira-user`
-   - `read:sprint:jira-software`
-   - `read:board-scope:jira-software`
-   - `offline_access`
+4. Add scopes in **Permissions** (must match what the app requests):
+   - **Jira API** → Configure → `View Jira issue data` (`read:jira-work`)
+   - Optional: `View user profiles`, Jira Software sprint/board scopes
+   - `offline_access` needs no console toggle
 5. Copy Client ID / Secret into `.env` as `JIRA_CLIENT_ID` / `JIRA_CLIENT_SECRET`.
 6. In the app: **Integrations → Jira → Connect → OAuth**.
+
+**If Accept shows "Something went wrong"**: a scope is missing in Permissions, or you're not signed in as the app owner (development-mode apps). Use **Personal Access Token** instead for fastest local setup.
 
 For local development you can also use **Personal Access Token** (email + site URL + token).
 

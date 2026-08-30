@@ -27,6 +27,7 @@ class Settings(BaseSettings):
   jira_client_id: str = ""
   jira_client_secret: str = ""
   jira_redirect_uri: str = "http://127.0.0.1:8000/api/integrations/jira/callback"
+  jira_oauth_extra_scopes: str = ""
 
   github_client_id: str = ""
   github_client_secret: str = ""

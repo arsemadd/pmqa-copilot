@@ -86,7 +86,12 @@ def _public_oauth(config: dict[str, str], *, include_base_url: bool = False) -> 
 
 
 def get_jira_oauth_public() -> dict:
-  return _public_oauth(get_jira_oauth_config())
+  from app.integrations.jira.integration import JIRA_OAUTH_SCOPE_GUIDE, get_jira_oauth_scopes
+
+  payload = _public_oauth(get_jira_oauth_config())
+  payload["scopes"] = get_jira_oauth_scopes()
+  payload["scope_guide"] = JIRA_OAUTH_SCOPE_GUIDE
+  return payload
 
 
 def get_github_oauth_public() -> dict:

@@ -94,6 +94,25 @@ export const api = {
       handleResponse<{ issues: Array<Record<string, unknown>> }>(r),
     ),
 
+  getProjects: () =>
+    fetch(`${API_BASE}/api/integrations/jira/projects`).then((r) =>
+      handleResponse<{
+        projects: Array<{ id: string; key: string; name: string; selected: boolean }>
+      }>(r),
+    ),
+
+  updateProjects: (selected_projects: string[]) =>
+    fetch(`${API_BASE}/api/integrations/jira/projects`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selected_projects }),
+    }).then((r) => handleResponse<IntegrationInfo>(r)),
+
+  autoSelectJiraProject: () =>
+    fetch(`${API_BASE}/api/integrations/jira/auto-select-project`, { method: 'POST' }).then((r) =>
+      handleResponse<IntegrationInfo>(r),
+    ),
+
   getPullRequests: (id: string = 'github') =>
     fetch(`${API_BASE}/api/integrations/${id}/pull-requests`).then((r) =>
       handleResponse<{ pull_requests: Array<Record<string, unknown>> }>(r),
@@ -129,6 +148,13 @@ export const api = {
         client_id_set: boolean
         client_secret_set: boolean
         redirect_uri: string
+        scopes?: string[]
+        scope_guide?: Array<{
+          scope: string
+          label: string
+          where: string
+          required: boolean
+        }>
       }>(r),
     ),
 

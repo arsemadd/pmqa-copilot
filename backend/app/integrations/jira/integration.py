@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from typing import Any
@@ -21,18 +22,98 @@ from app.integrations.base import (
   TestConnectionResult,
 )
 
+def infer_project_hint_from_url(url: str) -> str | None:
+  """Extract a project key or site slug from a Jira URL."""
+  if not url:
+    return None
+
+  browse_match = re.search(r"/browse/([A-Za-z][A-Za-z0-9]+)-\d+", url)
+  if browse_match:
+    return browse_match.group(1).upper()
+
+  project_match = re.search(r"/projects/([^/?#]+)", url)
+  if project_match:
+    return project_match.group(1).upper()
+
+  host_match = re.search(r"https?://([^.]+)\.atlassian\.net", url, re.IGNORECASE)
+  if host_match:
+    return host_match.group(1).upper()
+
+  return None
+
+
+def match_project_for_hint(projects: list[dict[str, Any]], hint: str) -> dict[str, Any] | None:
+  hint_upper = hint.upper()
+  hint_lower = hint.lower()
+
+  for project in projects:
+    key = str(project.get("key") or "").upper()
+    name = str(project.get("name") or "").lower()
+    if key == hint_upper:
+      return project
+    if hint_lower in name or hint_upper in key or hint_lower in key.lower():
+      return project
+
+  return None
+
 ATLASSIAN_AUTHORIZE_URL = "https://auth.atlassian.com/authorize"
 ATLASSIAN_TOKEN_URL = "https://auth.atlassian.com/oauth/token"
 ATLASSIAN_RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
 ATLASSIAN_ME_URL = "https://api.atlassian.com/me"
 
-JIRA_SCOPES = [
+# Minimal scopes reduce Atlassian consent failures when the developer console
+# is missing optional Jira Software permissions. Extra scopes can be added via
+# JIRA_OAUTH_EXTRA_SCOPES in .env (space-separated).
+JIRA_OAUTH_SCOPES_CORE = [
   "read:jira-work",
-  "read:jira-user",
-  "read:sprint:jira-software",
-  "read:board-scope:jira-software",
   "offline_access",
 ]
+
+JIRA_OAUTH_SCOPE_GUIDE = [
+  {
+    "scope": "read:jira-work",
+    "label": "View Jira issues and projects",
+    "where": "Permissions → Jira API → Configure → View Jira issue data",
+    "required": True,
+  },
+  {
+    "scope": "read:jira-user",
+    "label": "View user profiles",
+    "where": "Permissions → Jira API → Configure → View user profiles",
+    "required": False,
+  },
+  {
+    "scope": "read:sprint:jira-software",
+    "label": "View sprints",
+    "where": "Permissions → Jira Software API → Configure → Read sprints",
+    "required": False,
+  },
+  {
+    "scope": "read:board-scope:jira-software",
+    "label": "View boards and backlogs",
+    "where": "Permissions → Jira Software API → Configure → Read boards",
+    "required": False,
+  },
+  {
+    "scope": "offline_access",
+    "label": "Refresh tokens (no console toggle needed)",
+    "where": "Included automatically in the authorization URL",
+    "required": True,
+  },
+]
+
+
+def get_jira_oauth_scopes() -> list[str]:
+  from app.core.settings import get_settings
+
+  settings = get_settings()
+  scopes = list(JIRA_OAUTH_SCOPES_CORE)
+  extra = (settings.jira_oauth_extra_scopes or "").strip()
+  if extra:
+    for item in extra.split():
+      if item not in scopes:
+        scopes.append(item)
+  return scopes
 
 
 class JiraIntegration(Integration):
@@ -89,6 +170,7 @@ class JiraIntegration(Integration):
         "cloud_id": data.get("cloud_id"),
         "site_name": data.get("site_name"),
         "account_name": data.get("account_name"),
+        "selected_project_keys": data.get("selected_project_keys") or [],
       },
       oauth_configured=oauth_configured,
     )
@@ -110,7 +192,7 @@ class JiraIntegration(Integration):
     params = {
       "audience": "api.atlassian.com",
       "client_id": oauth["client_id"],
-      "scope": " ".join(JIRA_SCOPES),
+      "scope": " ".join(get_jira_oauth_scopes()),
       "redirect_uri": oauth["redirect_uri"],
       "state": state,
       "response_type": "code",
@@ -179,6 +261,7 @@ class JiraIntegration(Integration):
       ],
     }
     save_connection(self.id, payload)
+    await self.auto_select_projects_from_url(site.get("url") or "")
     return self.get_info()
 
   async def connect_with_pat(self, token: str, **kwargs: Any) -> IntegrationInfo:
@@ -208,10 +291,52 @@ class JiraIntegration(Integration):
       "site_name": base_url.replace("https://", "").replace("http://", ""),
     }
     save_connection(self.id, payload)
+    await self.auto_select_projects_from_url(base_url)
     return self.get_info()
 
   async def disconnect(self) -> None:
     delete_connection(self.id)
+
+  def selected_project_keys(self) -> list[str]:
+    data = load_connection(self.id) or {}
+    return list(data.get("selected_project_keys") or [])
+
+  async def update_selected_projects(self, project_keys: list[str]) -> IntegrationInfo:
+    data = load_connection(self.id)
+    if not data or not self._is_connected(data):
+      raise ValueError("Jira is not connected.")
+    cleaned = [key.strip().upper() for key in project_keys if key and key.strip()]
+    data["selected_project_keys"] = cleaned
+    save_connection(self.id, data)
+    return self.get_info()
+
+  async def auto_select_projects_from_url(self, url: str) -> None:
+    if self.selected_project_keys():
+      return
+
+    hint = infer_project_hint_from_url(url)
+    if not hint:
+      return
+
+    try:
+      body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50})
+      projects = body.get("values", [])
+      match = match_project_for_hint(projects, hint)
+      if match and match.get("key"):
+        data = load_connection(self.id) or {}
+        data["selected_project_keys"] = [str(match["key"]).upper()]
+        save_connection(self.id, data)
+    except Exception:
+      return
+
+  def _default_jql(self) -> str:
+    keys = self.selected_project_keys()
+    if not keys:
+      return "updated >= -14d ORDER BY updated DESC"
+    if len(keys) == 1:
+      return f"project = {keys[0]} AND updated >= -14d ORDER BY updated DESC"
+    joined = ", ".join(keys)
+    return f"project in ({joined}) AND updated >= -14d ORDER BY updated DESC"
 
   async def authenticate(self) -> bool:
     data = load_connection(self.id)
@@ -336,7 +461,17 @@ class JiraIntegration(Integration):
 
   async def get_projects(self) -> list[dict[str, Any]]:
     body = await self._jira_get("/rest/api/3/project/search", {"maxResults": 50})
-    return body.get("values", [])
+    selected = set(self.selected_project_keys())
+    return [
+      {
+        "id": project.get("id"),
+        "key": project.get("key"),
+        "name": project.get("name"),
+        "projectTypeKey": project.get("projectTypeKey"),
+        "selected": str(project.get("key") or "").upper() in selected,
+      }
+      for project in body.get("values", [])
+    ]
 
   async def get_issues(
     self,
@@ -344,7 +479,7 @@ class JiraIntegration(Integration):
     jql: str | None = None,
     max_results: int = 50,
   ) -> list[dict[str, Any]]:
-    query = jql or "updated >= -14d ORDER BY updated DESC"
+    query = jql or self._default_jql()
     body = await self._jira_get(
       "/rest/api/3/search",
       {

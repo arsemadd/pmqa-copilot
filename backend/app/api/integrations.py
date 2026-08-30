@@ -32,6 +32,10 @@ class SelectedReposRequest(BaseModel):
   selected_repos: list[str]
 
 
+class SelectedProjectsRequest(BaseModel):
+  selected_projects: list[str]
+
+
 @router.get("", response_model=list[IntegrationInfo])
 async def list_integrations() -> list[IntegrationInfo]:
   return registry.list_info()
@@ -170,6 +174,45 @@ async def get_projects(integration_id: str) -> dict:
   try:
     projects = await registry.get("jira").get_projects()  # type: ignore[attr-defined]
     return {"projects": projects}
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/{integration_id}/projects", response_model=IntegrationInfo)
+async def update_projects(integration_id: str, body: SelectedProjectsRequest) -> IntegrationInfo:
+  if integration_id != "jira":
+    raise HTTPException(status_code=501, detail="Projects endpoint is only available for Jira.")
+  try:
+    info = await registry.get("jira").update_selected_projects(body.selected_projects)  # type: ignore[attr-defined]
+    try:
+      await sync_integration(integration_id)
+    except Exception:
+      pass
+    return info
+  except KeyError as exc:
+    raise HTTPException(status_code=404, detail=str(exc)) from exc
+  except ValueError as exc:
+    raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/jira/auto-select-project", response_model=IntegrationInfo)
+async def auto_select_jira_project() -> IntegrationInfo:
+  from app.core.storage import load_connection
+
+  try:
+    jira = registry.get("jira")
+    connection = load_connection("jira") or {}
+    site_url = str(connection.get("site_url") or "")
+    if not site_url:
+      raise ValueError("Jira is not connected or site URL is missing.")
+    await jira.auto_select_projects_from_url(site_url)  # type: ignore[attr-defined]
+    try:
+      await sync_integration("jira")
+    except Exception:
+      pass
+    return jira.get_info()
   except KeyError as exc:
     raise HTTPException(status_code=404, detail=str(exc)) from exc
   except ValueError as exc:

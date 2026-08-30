@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import { GitHostingReposPanel } from '../components/GitHostingReposPanel'
 import { JiraIssuesPreview } from '../components/JiraIssuesPreview'
 import { JiraOAuthSetup } from '../components/JiraOAuthSetup'
+import { JiraProjectsPanel } from '../components/JiraProjectsPanel'
 import { OAuthSetup } from '../components/OAuthSetup'
 import type { AuthMethod, IntegrationInfo } from '../types'
 
@@ -43,7 +44,14 @@ export const IntegrationsPage = () => {
         setSearchParams({}, { replace: true })
         void load()
       } else if (status === 'error') {
-        setError(rawMessage ? decodeURIComponent(rawMessage) : `${label} OAuth failed.`)
+        const decoded = rawMessage ? decodeURIComponent(rawMessage) : `${label} OAuth failed.`
+        if (key === 'jira') {
+          setError(
+            `${decoded} If Atlassian showed "Something went wrong" on Accept, enable every scope in the checklist above, use the app owner's Atlassian account, then retry — or connect with Personal Access Token instead.`,
+          )
+        } else {
+          setError(decoded)
+        }
         setSearchParams({}, { replace: true })
       }
     }
@@ -128,7 +136,7 @@ export const IntegrationsPage = () => {
         <p className="text-sm text-[var(--color-ink-muted)]">Loading integrations…</p>
       ) : (
         <div className="space-y-6">
-          {jira && !jira.oauth_configured ? (
+          {jira ? (
             <JiraOAuthSetup
               key={oauthKey}
               onSaved={() => {
@@ -228,7 +236,7 @@ const IntegrationCard = ({
   onError,
 }: IntegrationCardProps) => {
   const connected = integration.status === 'connected'
-  const [authMethod, setAuthMethod] = useState<AuthMethod>('oauth')
+  const [authMethod, setAuthMethod] = useState<AuthMethod>(integration.id === 'jira' ? 'pat' : 'oauth')
   const [showConnectForm, setShowConnectForm] = useState(false)
   const [token, setToken] = useState('')
   const [email, setEmail] = useState('')
@@ -330,7 +338,16 @@ const IntegrationCard = ({
         )}
       </div>
 
-      {connected && integration.id === 'jira' ? <JiraIssuesPreview onError={onError} /> : null}
+      {connected && integration.id === 'jira' ? (
+        <>
+          <JiraProjectsPanel
+            siteUrl={integration.workspace_label}
+            onSaved={() => void onPatConnected()}
+            onError={onError}
+          />
+          <JiraIssuesPreview onError={onError} />
+        </>
+      ) : null}
       {connected && integration.id === 'github' ? (
         <GitHostingReposPanel
           integrationId="github"
@@ -381,7 +398,14 @@ const IntegrationCard = ({
           </fieldset>
 
           {authMethod === 'oauth' ? (
-            <div className="mt-4 flex flex-wrap gap-3">
+            <div className="mt-4 space-y-3">
+              {integration.id === 'jira' ? (
+                <p className="text-xs text-[var(--color-ink-muted)]">
+                  Use the same Atlassian account that owns your OAuth app. If Accept fails, follow the scope checklist
+                  at the top of this page or switch to Personal Access Token.
+                </p>
+              ) : null}
+              <div className="flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={onOAuth}
@@ -397,11 +421,24 @@ const IntegrationCard = ({
               >
                 Cancel
               </button>
+              </div>
             </div>
           ) : (
             <form className="mt-4 space-y-3" onSubmit={(event) => void handlePatSubmit(event)}>
               {integration.id === 'jira' ? (
                 <>
+                  <p className="text-xs text-[var(--color-ink-muted)]">
+                    Recommended for local dev. Create a token at{' '}
+                    <a
+                      href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[var(--color-primary)] underline"
+                    >
+                      id.atlassian.com → Security → API tokens
+                    </a>
+                    .
+                  </p>
                   <label className="block text-sm">
                     <span className="mb-1 block text-[var(--color-ink-muted)]">Atlassian email</span>
                     <input

@@ -6,6 +6,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,8 @@ def extract_text(filename: str, raw: bytes) -> str:
     return _extract_pdf(raw)
   if lower.endswith(".docx"):
     return _extract_docx(raw)
+  if lower.endswith((".html", ".htm")):
+    return _extract_html(raw)
   # md / txt / json / yaml / etc.
   for encoding in ("utf-8", "utf-16", "latin-1"):
     try:
@@ -86,6 +89,23 @@ def _extract_docx(raw: bytes) -> str:
     return "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text)
   except Exception as exc:
     raise ValueError(f"Failed to read DOCX: {exc}") from exc
+
+
+def _extract_html(raw: bytes) -> str:
+  for encoding in ("utf-8", "utf-16", "latin-1"):
+    try:
+      html = raw.decode(encoding)
+      break
+    except UnicodeDecodeError:
+      continue
+  else:
+    html = raw.decode("utf-8", errors="ignore")
+
+  # Drop scripts/styles, then strip tags for BM25 text.
+  html = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
+  html = re.sub(r"(?is)<(br|p|div|li|h[1-6]|tr)[^>]*>", "\n", html)
+  text = re.sub(r"(?s)<[^>]+>", " ", html)
+  return unescape(re.sub(r"\s+", " ", text)).strip()
 
 
 def chunk_text(text: str) -> list[str]:

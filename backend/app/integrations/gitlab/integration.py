@@ -246,7 +246,7 @@ class GitLabIntegration(Integration):
 
   async def update_selected_repos(self, repos: list[str]) -> IntegrationInfo:
     data = load_connection(self.id)
-    if not data or not data.get("pat_token"):
+    if not data or not self._is_connected(data):
       raise ValueError("GitLab is not connected.")
     data["selected_repos"] = repos
     save_connection(self.id, data)
