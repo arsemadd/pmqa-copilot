@@ -40,11 +40,15 @@ class Settings(BaseSettings):
 
   @property
   def cors_origins(self) -> list[str]:
-    return [
-      self.pmqa_frontend_url,
+    origins = {
+      self.pmqa_frontend_url.rstrip("/"),
+      self.pmqa_backend_url.rstrip("/"),
       "http://localhost:5173",
       "http://127.0.0.1:5173",
-    ]
+      "http://localhost:8000",
+      "http://127.0.0.1:8000",
+    }
+    return [origin for origin in origins if origin]
 
 
 @lru_cache

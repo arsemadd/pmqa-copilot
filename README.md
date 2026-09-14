@@ -59,6 +59,12 @@ npm run dev
 
 App: http://127.0.0.1:5173
 
+## Deploy the full live app
+
+Shared **cPanel / PHP hosting cannot run this app**. Use Railway or Render — see **[DEPLOY.md](./DEPLOY.md)**.
+
+Summary: one Docker service builds the React UI and serves it from FastAPI. No MySQL required.
+
 ## Jira OAuth setup (Atlassian 3LO)
 
 1. Create an app at [Atlassian Developer Console](https://developer.atlassian.com/console/myapps/).
